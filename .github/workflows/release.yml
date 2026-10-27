@@ -92,7 +92,7 @@ jobs:
       - name: Выложить на itch.io (butler)
         if: env.IS_TAG == 'true' && env.BUTLER_API_KEY != ''
         run: |
-          curl -fsSL -o /tmp/butler.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default
+          curl -fsSL -o /tmp/butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
           unzip -q /tmp/butler.zip -d ~/butler && chmod +x ~/butler/butler
           ~/butler/butler -V
           ~/butler/butler push build/windows "$ITCH_GAME:windows" --userversion "$VERSION"
