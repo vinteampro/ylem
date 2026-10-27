@@ -1,0 +1,7 @@
+.git
+.github
+.godot
+.claude
+build
+dist
+*.log

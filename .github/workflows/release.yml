@@ -1,0 +1,125 @@
+# Релиз по тегу: git tag v1.2.3 && git push origin v1.2.3
+# Собирает Windows / Linux / Web, выкладывает на itch.io через butler,
+# создаёт GitHub Release и выкладывает веб-версию на ylem.live (self-hosted runner на Mac Mini).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Версия без «v» (для ручного запуска; на itch и GitHub ничего не выкладывается)"
+        default: "0.0.0"
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: "4.7.2"
+  ITCH_GAME: "vinteam/ylem"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # Секреты нельзя проверять в if: напрямую, поэтому переносим их в env
+      BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Версия из тега
+        run: |
+          if [ "$IS_TAG" = "true" ]; then V="${GITHUB_REF_NAME#v}"; else V="${{ inputs.version }}"; fi
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+          # В свойства .exe идёт только числовая часть: 1.2.3-beta → 1.2.3.0
+          NUM=$(echo "$V" | grep -oE '^[0-9]+(\.[0-9]+){0,3}' || echo 0)
+          while [ "$(echo "$NUM" | tr -cd . | wc -c)" -lt 3 ]; do NUM="$NUM.0"; done
+          sed -i -E "s/^application\/(file|product)_version=.*/application\/\1_version=\"$NUM\"/" export_presets.cfg
+          echo "Версия $V (exe: $NUM)"
+
+      - name: Кэш Godot и шаблонов экспорта
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}
+
+      - name: Скачать Godot и шаблоны экспорта
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          mkdir -p ~/godot ~/.local/share/godot/export_templates
+          curl -fsSL -o /tmp/godot.zip "$BASE/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d ~/godot
+          mv ~/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64 ~/godot/godot
+          curl -fsSL -o /tmp/templates.tpz "$BASE/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          unzip -q /tmp/templates.tpz -d /tmp/tpl
+          mv /tmp/tpl/templates ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+
+      - name: Импорт ресурсов
+        run: ~/godot/godot --headless --import
+
+      - name: Экспорт Windows / Linux / Web
+        run: |
+          mkdir -p build/windows build/linux build/web
+          ~/godot/godot --headless --export-release "Windows Desktop" build/windows/Ylem.exe
+          ~/godot/godot --headless --export-release "Linux" build/linux/Ylem.x86_64
+          ~/godot/godot --headless --export-release "Web" build/web/index.html
+          # Godot иногда пишет ошибку, но возвращает 0 — проверяем, что файлы на месте
+          test -s build/windows/Ylem.exe
+          test -s build/linux/Ylem.x86_64
+          test -s build/web/index.wasm
+          ls -la build/*
+
+      - name: Архивы для GitHub Release
+        run: |
+          mkdir -p dist
+          (cd build/windows && zip -qr "../../dist/Ylem-${VERSION}-windows.zip" .)
+          tar -czf "dist/Ylem-${VERSION}-linux.tar.gz" -C build/linux .
+          (cd build/web && zip -qr "../../dist/Ylem-${VERSION}-web.zip" .)
+          ls -la dist
+
+      - name: Сохранить сборки как артефакт
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ylem-${{ env.VERSION }}
+          path: dist/
+
+      - name: Выложить на itch.io (butler)
+        if: env.IS_TAG == 'true' && env.BUTLER_API_KEY != ''
+        run: |
+          curl -fsSL -o /tmp/butler.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default
+          unzip -q /tmp/butler.zip -d ~/butler && chmod +x ~/butler/butler
+          ~/butler/butler -V
+          ~/butler/butler push build/windows "$ITCH_GAME:windows" --userversion "$VERSION"
+          ~/butler/butler push build/linux   "$ITCH_GAME:linux"   --userversion "$VERSION"
+          ~/butler/butler push build/web     "$ITCH_GAME:html5"   --userversion "$VERSION"
+
+      - name: GitHub Release
+        if: env.IS_TAG == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Ylem $VERSION" --generate-notes \
+            || gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+
+  # Веб-версия на ylem.live: раннер стоит на Mac Mini рядом с Traefik,
+  # образ собирается и запускается там же, без registry и SSH (как у battle_city).
+  deploy-web:
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'vinteampro/ylem'
+    needs: build
+    runs-on: [self-hosted, mac-mini]
+    concurrency:
+      group: deploy-web
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose build
+      - run: docker compose up -d --remove-orphans
+      - run: docker compose ps
+      - run: docker image prune -f
