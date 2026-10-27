@@ -21,9 +21,10 @@ const RATE := 22050
 const MUSIC_DIR := "res://audio/music/"
 const SETTINGS := "user://settings.cfg"
 const MUSIC_BUS_DB := -4.0
+const DEFAULT_MUSIC_VOLUME := 0.33
 
-var music_volume := 1.0
-var _volume_before_mute := 1.0
+var music_volume := DEFAULT_MUSIC_VOLUME
+var _volume_before_mute := DEFAULT_MUSIC_VOLUME
 var _save_at := -1
 
 var _music_a: AudioStreamPlayer
@@ -62,7 +63,7 @@ func _ready() -> void:
 	_setup_buses()
 	var cfg := ConfigFile.new()
 	if cfg.load(SETTINGS) == OK:
-		music_volume = clampf(float(cfg.get_value("audio", "music_volume", 1.0)), 0.0, 1.0)
+		music_volume = clampf(float(cfg.get_value("audio", "music_volume", DEFAULT_MUSIC_VOLUME)), 0.0, 1.0)
 	_apply_music_volume()
 	_music_a = _player("Music", null, -80.0)
 	_music_b = _player("Music", null, -80.0)

@@ -16,6 +16,7 @@ signal detent
 
 const Fmt := preload("res://scripts/fmt.gd")
 const I18n := preload("res://scripts/i18n.gd")
+const Audio := preload("res://scripts/audio_director.gd")
 
 const ACCENT := Color(1.0, 0.84, 0.6)
 const TEXT := Color(0.88, 0.9, 0.97, 0.94)
@@ -278,13 +279,13 @@ func _build_controls() -> void:
 		x = _snap(_sl_speed, x, 1.0, 0.05)
 		_refresh_slider_labels()
 		speed_changed.emit(x))
-	r = _slider_row(v, I18n.t("music"), 0.0, 1.0, 0.01, 1.0)
+	r = _slider_row(v, I18n.t("music"), 0.0, 1.0, 0.01, Audio.DEFAULT_MUSIC_VOLUME)
 	_sl_music = r[0]
 	_lb_music = r[1]
 	_sl_music.value_changed.connect(func(x: float) -> void:
 		_refresh_slider_labels()
 		music_volume_changed.emit(x))
-	for item in [[_sl_exp, 1.0], [_sl_den, 0.0], [_sl_speed, 1.0], [_sl_music, 1.0]]:
+	for item in [[_sl_exp, 1.0], [_sl_den, 0.0], [_sl_speed, 1.0], [_sl_music, Audio.DEFAULT_MUSIC_VOLUME]]:
 		_fine_control(item[0], item[1])
 
 	var buttons := HBoxContainer.new()
