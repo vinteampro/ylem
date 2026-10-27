@@ -30,8 +30,8 @@ Workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) сам
 
 - После первого push от butler загрузку `html5` нужно отметить на странице игры как «This file will be played in the browser».
 - Файлы, загруженные раньше вручную, butler не трогает. Их нужно удалить на странице игры самому.
-- SharedArrayBuffer включать не нужно: веб-сборка собирается без потоков.
+- В Embed options **включить SharedArrayBuffer support**: веб-сборка с потоками (звук смешивается в отдельном потоке и не рвётся, когда кадр тормозит), без этой галочки она не запустится.
 
 ## Веб-сервер
 
-nginx в контейнере ([`docker/nginx.conf`](docker/nginx.conf)) сжимает `.wasm`/`.pck` и ставит `Cache-Control: no-cache`, чтобы после релиза браузер сразу брал новую версию. COOP/COEP не нужны: сборка без потоков.
+nginx в контейнере ([`docker/nginx.conf`](docker/nginx.conf)) сжимает `.wasm`/`.pck` и ставит `Cache-Control: no-cache`, чтобы после релиза браузер сразу брал новую версию. Ещё он отдаёт заголовки COOP/COEP: без них браузер не даст сборке с потоками SharedArrayBuffer.
