@@ -135,6 +135,9 @@ var _halo_mm: MultiMesh
 var _flash_mm: MultiMesh
 var _ring_mm: MultiMesh
 var _core_buf := PackedFloat32Array()
+# sin(i) и cos(i) по номеру слота: мерцание sin(ωt + i) = sin ωt·cos i + cos ωt·sin i.
+var _phase_s := PackedFloat32Array()
+var _phase_c := PackedFloat32Array()
 var _halo_buf := PackedFloat32Array()
 var _flash_buf := PackedFloat32Array()
 var _ring_buf := PackedFloat32Array()
@@ -148,6 +151,11 @@ func _ready() -> void:
 	_ring_mm = _make_layer(MAX_FLASH, ring)
 	_flash_mm = _make_layer(MAX_FLASH, glow)
 	_core_buf.resize(CAP * FLOATS)
+	_phase_s.resize(CAP)
+	_phase_c.resize(CAP)
+	for i in CAP:
+		_phase_s[i] = sin(float(i))
+		_phase_c[i] = cos(float(i))
 	_halo_buf.resize(CAP * FLOATS)
 	_flash_buf.resize(MAX_FLASH * FLOATS)
 	_ring_buf.resize(MAX_FLASH * FLOATS)
@@ -927,11 +935,15 @@ func _update_flicker(delta: float) -> void:
 
 
 func _move_and_draw(delta: float) -> void:
+	# Самый горячий цикл игры (в браузере GDScript в разы медленнее), поэтому
+	# вызовы _to_screen/_write и константные таблицы развёрнуты здесь вручную.
 	var jitter := 30.0 + 170.0 * heat
 	var flow := 16.0 + 34.0 * heat
 	var damp := pow(0.45, delta)
 	var t := flow_t
 	var bc := box * 0.5
+	var bx := box.x
+	var by_ := box.y
 	var hub := hubble
 	var hs := hand_screen
 	var hm := hand_mode
@@ -940,10 +952,40 @@ func _move_and_draw(delta: float) -> void:
 	var inv_zoom := 1.0 / cam_zoom
 	var grav := gravity * 170.0
 	var size_zoom := pow(cam_zoom, 0.75)
+	var halo_zoom := 1.0 / sqrt(size_zoom)
 	var glow_boost := 1.0 + 0.12 * squeeze
 	var n_tick := 3.0 + 14.0 * n_clock
 	var margin := 80.0 * cam_zoom
-	var cm := color_mul
+	var zoom := cam_zoom
+	var vc := view * 0.5
+	var cam_off := bc - cam_center
+	var vmax := view + Vector2(margin, margin)
+	var gx_scale := GW / bx
+	var gy_scale := GH / by_
+	var touch_glow := 0.9 if hm > 0 else 0.0
+	var tw_s := sin(t * 2.3)
+	var tw_c := cos(t * 2.3)
+	var nt_s := sin(t * n_tick)
+	var nt_c := cos(t * n_tick)
+	var ph_s := _phase_s
+	var ph_c := _phase_c
+	# Цвет и размер видов на этот кадр (с учётом красного/синего смещения).
+	var cr := PackedFloat32Array()
+	var cg := PackedFloat32Array()
+	var cb := PackedFloat32Array()
+	var sz := PackedFloat32Array()
+	cr.resize(KIND_COUNT)
+	cg.resize(KIND_COUNT)
+	cb.resize(KIND_COUNT)
+	sz.resize(KIND_COUNT)
+	for k in KIND_COUNT:
+		var c: Color = COLORS[k]
+		cr[k] = c.r * color_mul.x
+		cg[k] = c.g * color_mul.y
+		cb[k] = c.b * color_mul.z
+		sz[k] = SIZES[k] * 4.0 * size_zoom
+	var core := _core_buf
+	var halo := _halo_buf
 	var j := 0
 	var hj := 0
 	for i in CAP:
@@ -969,7 +1011,7 @@ func _move_and_draw(delta: float) -> void:
 					v -= (dir * 460.0 - hv * 0.6) * touch * delta * inv_zoom
 
 		# Тёмные века: вещество скатывается в сгущения.
-		var cell := clampi(int(p.y / box.y * GH), 0, GH - 1) * GW + clampi(int(p.x / box.x * GW), 0, GW - 1)
+		var cell := clampi(int(p.y * gy_scale), 0, GH - 1) * GW + clampi(int(p.x * gx_scale), 0, GW - 1)
 		if grav > 0.0:
 			v += Vector2(_grad_x[cell], _grad_y[cell]) * grav * delta
 
@@ -988,15 +1030,15 @@ func _move_and_draw(delta: float) -> void:
 		var drifts := busy[i] == 0 and i != follow
 		if drifts:
 			p += (p - bc) * hub * delta
-		if p.x < 0.0 or p.x > box.x or p.y < 0.0 or p.y > box.y:
+		if p.x < 0.0 or p.x > bx or p.y < 0.0 or p.y > by_:
 			if drifts and hub > 0.0005:
 				p = _rand_pos()
 				fade[i] = 0.0
 			else:
-				p.x = fposmod(p.x, box.x)
-				p.y = fposmod(p.y, box.y)
+				p.x = fposmod(p.x, bx)
+				p.y = fposmod(p.y, by_)
 		elif drifts and hub < -0.0005 and (p - bc).length_squared() < 4900.0:
-			p = Vector2(randf() * box.x, 0.0 if randf() < 0.5 else box.y)
+			p = Vector2(randf() * bx, 0.0 if randf() < 0.5 else by_)
 			fade[i] = 0.0
 		pos[i] = p
 		vel[i] = v
@@ -1016,41 +1058,74 @@ func _move_and_draw(delta: float) -> void:
 			fade[i] = 0.0
 			continue   # ещё не родилась (stagger_birth)
 
-		var sp := _to_screen(p, d)
+		var sp := vc + ((p - bc) + cam_off * (0.55 + 0.45 * d)) * zoom
 		spos[i] = sp
-		if sp.x < -margin or sp.y < -margin or sp.x > view.x + margin or sp.y > view.y + margin:
+		if sp.x < -margin or sp.y < -margin or sp.x > vmax.x or sp.y > vmax.y:
 			continue
 
 		var k := kind[i]
-		var bright := (0.35 + 0.65 * d) * (1.0 + 2.5 * exp(-a * 3.0)) * f * glow_boost
-		bright *= 1.0 + 0.9 * touch * (1.0 if hm > 0 else 0.0)
+		# Вспышка рождения: через 4 с exp(-3a) < 10⁻⁵, считать её незачем.
+		var young := a < 4.0
+		var bright := (0.35 + 0.65 * d) * f * glow_boost
+		if young:
+			bright *= 1.0 + 2.5 * exp(-a * 3.0)
+		if touch > 0.0:
+			bright *= 1.0 + touch_glow * touch
 		if busy[i] == 1 and dying[i] == 0:
 			bright *= 1.6
-		match k:
-			K.E:
-				bright *= electron_alpha
-				if bright < 0.01:
-					continue
-			K.H, K.HE:
-				bright *= atom_dim * (1.0 + maxf(fluct[cell], 0.0) * gravity * 1.5)
-			K.N:
-				# Часы распада: чем дольше живёт нейтрон, тем тревожнее мерцает.
-				bright *= 0.8 + 0.2 * sin(t * n_tick + float(i))
-		bright *= 0.85 + 0.15 * sin(t * 2.3 + float(i))
-		var base_col: Color = COLORS[k]
-		var col := Color(base_col.r * cm.x, base_col.g * cm.y, base_col.b * cm.z)
-		var s: float = SIZES[k] * 4.0 * (0.55 + 0.45 * d) * (1.0 + 1.2 * exp(-a * 5.0)) * size_zoom
-		_write(_core_buf, j, sp, s, col.r * bright, col.g * bright, col.b * bright, 1.0)
+		if k == K.E:
+			bright *= electron_alpha
+			if bright < 0.01:
+				continue
+		elif k == K.H or k == K.HE:
+			bright *= atom_dim * (1.0 + maxf(fluct[cell], 0.0) * gravity * 1.5)
+		elif k == K.N:
+			# Часы распада: чем дольше живёт нейтрон, тем тревожнее мерцает.
+			bright *= 0.8 + 0.2 * (nt_s * ph_c[i] + nt_c * ph_s[i])
+		bright *= 0.85 + 0.15 * (tw_s * ph_c[i] + tw_c * ph_s[i])
+		var r := cr[k] * bright
+		var g := cg[k] * bright
+		var bl := cb[k] * bright
+		var s := sz[k] * (0.55 + 0.45 * d)
+		if young:
+			s *= 1.0 + 1.2 * exp(-a * 5.0)
+		var o := j * FLOATS
+		core[o] = s
+		core[o + 1] = 0.0
+		core[o + 2] = 0.0
+		core[o + 3] = sp.x
+		core[o + 4] = 0.0
+		core[o + 5] = s
+		core[o + 6] = 0.0
+		core[o + 7] = sp.y
+		core[o + 8] = r
+		core[o + 9] = g
+		core[o + 10] = bl
+		core[o + 11] = 1.0
 		j += 1
 		if k == K.HE4 or k == K.LI7 or k == K.H or k == K.HE:
 			var atom := k == K.H or k == K.HE
-			var hsz := s * (1.12 if atom else 1.1) / sqrt(size_zoom)
-			var hb := bright * (0.05 if atom else 0.07)
-			_write(_halo_buf, hj, sp, hsz, col.r * hb, col.g * hb, col.b * hb, 1.0)
+			var hsz := s * (1.12 if atom else 1.1) * halo_zoom
+			var hb := 0.05 if atom else 0.07
+			o = hj * FLOATS
+			halo[o] = hsz
+			halo[o + 1] = 0.0
+			halo[o + 2] = 0.0
+			halo[o + 3] = sp.x
+			halo[o + 4] = 0.0
+			halo[o + 5] = hsz
+			halo[o + 6] = 0.0
+			halo[o + 7] = sp.y
+			halo[o + 8] = r * hb
+			halo[o + 9] = g * hb
+			halo[o + 10] = bl * hb
+			halo[o + 11] = 1.0
 			hj += 1
-	_core_mm.buffer = _core_buf
+	_core_buf = core
+	_halo_buf = halo
+	_core_mm.buffer = core
 	_core_mm.visible_instance_count = j
-	_halo_mm.buffer = _halo_buf
+	_halo_mm.buffer = halo
 	_halo_mm.visible_instance_count = hj
 
 
