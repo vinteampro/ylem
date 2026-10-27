@@ -10,7 +10,10 @@ into helium, and nuclei capture electrons to become the first atoms.
 
 About 5 minutes, from the first microsecond to the Dark Ages. English and Russian.
 
-## Running
+**Play it on itch.io: [vinteam.itch.io/ylem](https://vinteam.itch.io/ylem)** — in the browser or
+as a download for Windows and Linux.
+
+## Running from source
 
 Open the folder in [Godot 4.7](https://godotengine.org/download/): Import → choose
 `project.godot`, then press **F5**. To build Windows, Linux or web versions, see "Building".
