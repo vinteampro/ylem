@@ -27,7 +27,7 @@ jobs:
       BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
       IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Версия из тега
         run: |
@@ -41,7 +41,7 @@ jobs:
 
       - name: Кэш Godot и шаблонов экспорта
         id: godot-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/godot
@@ -84,7 +84,7 @@ jobs:
           ls -la dist
 
       - name: Сохранить сборки как артефакт
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Ylem-${{ env.VERSION }}
           path: dist/
@@ -118,7 +118,7 @@ jobs:
       group: deploy-web
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker compose build
       - run: docker compose up -d --remove-orphans
       - run: docker compose ps
