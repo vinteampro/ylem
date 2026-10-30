@@ -10,8 +10,9 @@
 
 Прототип: ~5 минут, от первой микросекунды до тёмных веков.
 
-**Играть на itch.io: [vinteam.itch.io/ylem](https://vinteam.itch.io/ylem)** — в браузере или
-скачать для Windows и Linux.
+**Играть на itch.io: [vinteam.itch.io/ylem](https://vinteam.itch.io/ylem)** — скачать для Windows
+и Linux или в браузере (ещё на [ylem.live](https://ylem.live)). Скачанная версия красивее: в браузере
+(WebGL) свечение только приближённое.
 
 ## Как запустить из исходников
 
@@ -182,8 +183,9 @@ godot --headless --path . --export-release "Linux" build/linux/Ylem.x86_64
 godot --headless --path . --export-release "Web" build/web/index.html
 ```
 
-или в редакторе: Project → Export. Веб-сборка — без потоков, поэтому на itch.io
-не нужна галочка SharedArrayBuffer. В браузере (WebGL) кадр не хранит яркость
+или в редакторе: Project → Export. Веб-сборка — с потоками (звук смешивается вне основного
+потока), поэтому на itch.io нужна галочка **SharedArrayBuffer support**, а свой сервер должен
+отдавать заголовки COOP/COEP (см. [RELEASING.md](RELEASING.md)). В браузере (WebGL) кадр не хранит яркость
 выше 1, и `main.gd` там приглушает частицы и фон, а в конце кадра поднимает
 яркость обратно (`WEB_GAIN`) — иначе пропадает свечение.
 
@@ -205,6 +207,12 @@ godot --path . -- --start-T=1.5e9 --shot=shot_%d.png --shot-at=5,20
 `--demo=touch` (виртуальная рука рисует круг), `--demo=follow` (выбрать частицу),
 `--launch-at=2` (разбудить точку на стартовом экране самому на 2-й секунде).
 С `--start-T` стартовый экран пропускается.
+
+## Как помочь проекту
+
+Помощь с физикой и геймплеем приветствуется. Начни с [CONTRIBUTING.md](CONTRIBUTING.md): как
+запустить проверку физики и главное правило — никаких подгоночных коэффициентов, у каждого числа
+есть источник.
 
 ## Лицензия
 

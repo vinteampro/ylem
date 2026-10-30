@@ -10,8 +10,9 @@ into helium, and nuclei capture electrons to become the first atoms.
 
 About 5 minutes, from the first microsecond to the Dark Ages. English and Russian.
 
-**Play it on itch.io: [vinteam.itch.io/ylem](https://vinteam.itch.io/ylem)** — in the browser or
-as a download for Windows and Linux.
+**Play it on itch.io: [vinteam.itch.io/ylem](https://vinteam.itch.io/ylem)** — as a download for
+Windows and Linux, or in the browser (also at [ylem.live](https://ylem.live)). The downloads look
+better: in the browser (WebGL) the glow is only approximated.
 
 ## Running from source
 
@@ -185,8 +186,9 @@ godot --headless --path . --export-release "Linux" build/linux/Ylem.x86_64
 godot --headless --path . --export-release "Web" build/web/index.html
 ```
 
-or in the editor: Project → Export. The web build has no thread support, so itch.io does not
-need the SharedArrayBuffer option. In the browser (WebGL) the frame cannot store brightness
+or in the editor: Project → Export. The web build uses threads (audio is mixed off the main
+thread), so on itch.io enable **SharedArrayBuffer support**, and a self-hosted server must send
+COOP/COEP headers (see [RELEASING.md](RELEASING.md)). In the browser (WebGL) the frame cannot store brightness
 above 1, so `main.gd` dims particles and the background there and raises brightness back at
 the end of the frame (`WEB_GAIN`) — otherwise the glow disappears.
 
@@ -208,6 +210,11 @@ More debug arguments: `--expansion=2 --density=0.3` (starting levers),
 `--demo=touch` (a virtual hand draws a circle), `--demo=follow` (pick a particle),
 `--launch-at=2` (wake the point on the start screen automatically at 2 s).
 With `--start-T` the start screen is skipped.
+
+## Contributing
+
+Help with the physics and the gameplay is welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md):
+how to run the physics check, and the main rule: no fudge factors, every number has a source.
 
 ## License
 
