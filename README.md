@@ -21,17 +21,18 @@ Open the folder in [Godot 4.7](https://godotengine.org/download/): Import → ch
 
 ## Controls
 
-**Levers**
+**Controls**
 
 | | |
 |---|---|
 | **Expansion rate** | slower — neutrons have time to decay, less helium; faster — more helium; below zero — contraction and reheating. You see it at once: particles stream from the centre, brightness and pitch change |
 | **Matter density** | denser — more particles, deuterium burns almost entirely; sparser — fewer particles, more deuterium survives |
 | **Flow of time** | from pause to ×2 |
-| **Let go** | the levers drift back to the values of our Universe |
+| **Let go** | the sliders drift back to the values of our Universe |
 | Near our Universe's value | the slider snaps to it with a soft click |
 | Double-click a slider | reset to our Universe's value |
 | Mouse wheel over a slider | step; with Shift — fine step |
+| Click a panel title | collapse or expand just that panel (remembered) |
 
 You can hear and see the expansion rate: while you drag the slider, the H-alpha line sounds
 and slides down as expansion speeds up (redshift) and up as it slows (blueshift), and the
@@ -54,7 +55,7 @@ decay clock.
 | Space | pause |
 | H | hide the interface |
 | F / F11 | fullscreen |
-| English / Русский | language button in the levers panel (system language by default) |
+| English / Русский | language button in the Controls panel (system language by default) |
 
 Your touches are **density fluctuations**. Where you compressed the plasma, cold spots appear
 in the cosmic microwave background after recombination (the Sachs–Wolfe effect), and in the
@@ -139,7 +140,12 @@ earlier, by about 0.5% in redshift.
   scheme with Newton's method. Above 27 billion K nuclei do not survive; only n ⇄ p is computed.
 - *Recombination* — hydrogen per Peebles (through the n = 2 level), helium per Saha. The moment
   of transparency is the peak of the visibility function g = τ'·e^(−τ).
-- *Dark Ages* — clump contrast grows with the scale factor (δ ∝ a).
+- *Clumps* (the hand's touches, `scripts/structure.gd`) — linear perturbation theory for a
+  single scale (k = 0.15 Mpc⁻¹), dark matter and baryons. While baryons are tied to light they
+  oscillate at the sound speed c/√(3(1+R)) and suffer Silk damping; the coupling fades with the
+  free electrons from the recombination model, and the baryons fall into dark-matter wells.
+  Hubble friction 2H·δ̇ includes the player's expansion multiplier, so fast expansion slows
+  growth and contraction speeds it up. In the Dark Ages the contrast grows roughly as a.
 
 **Simplified:**
 - the quark–hadron transition is a smooth blend of a pion gas and the quark–gluon plasma, and
@@ -151,9 +157,11 @@ earlier, by about 0.5% in redshift.
   the closest analogue is extra neutrino species, and that is checked against AlterBBN;
 - the player's "hand" is artistic licence. Real fluctuations were laid down by inflation long
   before the first microsecond. The model counts the reactions; the hand only decides where a
-  flash is shown. The sign of the spots follows the large-scale Sachs–Wolfe effect (an
-  overdensity looks cold); below the sound horizon it would depend on the phase of acoustic
-  oscillations. CMB anisotropies are amplified about 10,000 times, otherwise they would be invisible;
+  flash is shown. Clumps from the hand grow by linear theory (see above), but their amplitude is
+  exaggerated tens of thousands of times (ours is δ ~ 10⁻⁵), every touch has the same scale, and
+  nonlinear collapse is not modelled: δ > 1 counts as a collapsed cloud. The sign of the spots on
+  the CMB follows the large-scale Sachs–Wolfe effect (an overdensity looks cold). CMB
+  anisotropies are amplified about 10,000 times, otherwise they would be invisible;
 - quark colours are arbitrary.
 
 ## Project layout
@@ -161,10 +169,11 @@ earlier, by about 0.5% in redshift.
 ```
 scenes/main.tscn            — the only scene; everything else is built in code
 scripts/universe.gd         — the physics model (numbers only, no graphics)
+scripts/structure.gd        — clump growth from touches: dark matter, sound in the plasma, Silk damping
 scripts/particle_field.gd   — particles, fusions, flashes, gamma rays (MultiMesh + HDR)
 scripts/main.gd             — the director: pacing, epochs, narration, wiring
 scripts/start_screen.gd     — start screen: wake the point with clicks, then the Big Bang
-scripts/hud.gd              — interface: timeline, composition, levers, results
+scripts/hud.gd              — interface: timeline, composition, controls, results
 scripts/audio_director.gd   — ambience, reaction "chimes", music per epoch
 scripts/i18n.gd             — all texts in Russian and English (UI, epochs, narration, codex)
 scripts/palette.gd          — plasma colours from black-body radiation

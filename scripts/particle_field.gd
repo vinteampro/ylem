@@ -19,6 +19,7 @@ signal follow_changed(active: bool)
 
 const Fmt := preload("res://scripts/fmt.gd")
 const I18n := preload("res://scripts/i18n.gd")
+const Structure := preload("res://scripts/structure.gd")
 
 enum K { QR, QG, QB, P, N, D, HE3, HE4, LI7, E, H, HE }
 
@@ -121,7 +122,10 @@ var follow_log: Array[String] = []
 var _was_following := false
 
 # Карта флуктуаций плотности (δ) в координатах мира.
-var fluct := PackedFloat32Array()
+var fluct := PackedFloat32Array()     # что видно на карте сгущений (см. Structure.visible)
+var structure                        # рост сгущений: тёмная материя и барионы по клеткам
+var _struct_u = null                 # модель Вселенной, по которой растут сгущения
+var _struct_t := -1.0                # космическое время последнего шага роста
 var fluct_tex: ImageTexture
 var _grad_x := PackedFloat32Array()
 var _grad_y := PackedFloat32Array()
@@ -165,6 +169,7 @@ func _ready() -> void:
 	fluct.resize(GW * GH)
 	_grad_x.resize(GW * GH)
 	_grad_y.resize(GW * GH)
+	structure = Structure.new(GW * GH)
 	_alloc()
 	_seed_fluct()
 
@@ -376,9 +381,10 @@ func sync(u) -> void:
 	if electron_alpha > 0.0 and not _electrons_ready:
 		_ensure_electrons()
 	atom_dim = clampf((lt - 2.5) / 1.1, 0.16, 1.0)
-	# После рекомбинации свет больше не мешает — гравитация начинает собирать вещество.
-	# В эпоху вещества контраст сгущений растёт как масштабный фактор: δ ∝ a ∝ 1/T.
-	gravity = clampf(0.25 * (2900.0 / u.T - 1.0), 0.0, 1.5)
+	# Сгущения растут по structure.gd; здесь — только то, насколько вещество уже
+	# свободно от света и частицы могут стекаться к сгущениям.
+	_struct_u = u
+	gravity = 1.2 * (1.0 - structure.coupling)
 	baryons_target = BASE_BARYONS * clampf(pow(u.eta_mult, 0.3), 0.5, 1.35)
 	# «Узкое горлышко»: дейтроны рождаются и сразу же разбиваются светом.
 	bottleneck = 1.0 if (u.T > 9.5e8 and u.T < 4.0e9 and u.hadron > 0.99) else 0.0
@@ -503,6 +509,10 @@ func _seed_fluct() -> void:
 			for w in waves:
 				v += float(w[3]) * sin(x * float(w[0]) + y * float(w[1]) + float(w[2]))
 			fluct[y * GW + x] = v * 0.025
+	structure.reset()
+	for i in GW * GH:
+		structure.add(i, fluct[i])
+	_struct_t = -1.0
 	_fluct_dirty = true
 
 
@@ -520,16 +530,26 @@ func _paint_hand(delta: float) -> void:
 		for x in range(maxi(0, floori(cx) - r), mini(GW, floori(cx) + r + 1)):
 			var d2 := (x + 0.5 - cx) * (x + 0.5 - cx) + (y + 0.5 - cy) * (y + 0.5 - cy)
 			var idx := y * GW + x
-			fluct[idx] = clampf(fluct[idx] + amount * exp(-d2 / (2.0 * sigma * sigma)), -1.0, 1.0)
+			structure.add(idx, amount * exp(-d2 / (2.0 * sigma * sigma)), 1.0)
+			fluct[idx] = clampf(structure.visible(idx), -1.0, 1.0)
 	_fluct_dirty = true
 
 
 func _update_fluct_texture(delta: float) -> void:
 	_fluct_timer -= delta
-	if not _fluct_dirty or _fluct_timer > 0.0:
+	if _fluct_timer > 0.0:
+		return
+	_fluct_timer = 0.05
+	if _struct_u != null:
+		var t: float = _struct_u.t
+		if _struct_t >= 0.0 and t > _struct_t and structure.step(_struct_u, t - _struct_t):
+			for i in GW * GH:
+				fluct[i] = clampf(structure.visible(i), -1.0, 1.0)
+			_fluct_dirty = true
+		_struct_t = t
+	if not _fluct_dirty:
 		return
 	_fluct_dirty = false
-	_fluct_timer = 0.05
 	var img := Image.create_from_data(GW, GH, false, Image.FORMAT_RF, fluct.to_byte_array())
 	if fluct_tex == null:
 		fluct_tex = ImageTexture.create_from_image(img)
@@ -542,14 +562,15 @@ func _update_fluct_texture(delta: float) -> void:
 			_grad_y[idx] = fluct[mini(y + 1, GH - 1) * GW + x] - fluct[maxi(y - 1, 0) * GW + x]
 
 
-## Сколько заметных сгущений нарисовал игрок (локальные максимумы δ).
-func count_clumps() -> int:
+## Сколько сгущений вещества с контрастом не меньше threshold (связные области карты).
+## 0,35 — заметное сгущение, 1 — уже схлопнулось в облако.
+func count_clumps(threshold := 0.35) -> int:
 	# Сгущение — связная область карты выше порога (не меньше 3 клеток).
 	var seen_cell := PackedByteArray()
 	seen_cell.resize(GW * GH)
 	var n := 0
 	for start in GW * GH:
-		if seen_cell[start] == 1 or fluct[start] < 0.35:
+		if seen_cell[start] == 1 or structure.matter(start) < threshold:
 			continue
 		var stack := PackedInt32Array([start])
 		seen_cell[start] = 1
@@ -566,7 +587,7 @@ func count_clumps() -> int:
 				if x < 0 or y < 0 or x >= GW or y >= GH:
 					continue
 				var i := y * GW + x
-				if seen_cell[i] == 0 and fluct[i] >= 0.35:
+				if seen_cell[i] == 0 and structure.matter(i) >= threshold:
 					seen_cell[i] = 1
 					stack.append(i)
 		if size >= 3:

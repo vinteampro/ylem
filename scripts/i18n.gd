@@ -1,7 +1,7 @@
 extends RefCounted
 ## Все тексты игры на двух языках: интерфейс, эпохи, реплики рассказчика, кодекс.
 ## Язык по умолчанию — язык системы (русский или английский), его можно сменить
-## кнопкой в панели рычагов; выбор запоминается в user://settings.cfg.
+## кнопкой в панели «Управление»; выбор запоминается в user://settings.cfg.
 
 static var lang := "en"
 
@@ -65,7 +65,7 @@ const UI := {
 	"title": ["Ylem", "Ylem"],
 	"subtitle": ["первые 400 000 лет · медитация на научной основе", "the first 400,000 years · a meditation built on real physics"],
 	"composition": ["СОСТАВ ВЕЩЕСТВА", "COMPOSITION"],
-	"controls": ["РЫЧАГИ", "CONTROLS"],
+	"controls": ["УПРАВЛЕНИЕ", "CONTROLS"],
 	"expansion": ["Темп расширения", "Expansion rate"],
 	"density": ["Плотность вещества", "Matter density"],
 	"speed": ["Ход времени", "Flow of time"],
@@ -73,7 +73,8 @@ const UI := {
 	"music_off": ["выключена", "off"],
 	"pause": ["Пауза · Пробел", "Pause · Space"],
 	"release": ["Отпустить", "Let go"],
-	"release_tip": ["Рычаги плавно вернутся к значениям нашей Вселенной", "The controls drift back to the values of our Universe"],
+	"release_tip": ["Ползунки плавно вернутся к значениям нашей Вселенной", "The controls drift back to the values of our Universe"],
+	"fold_tip": ["Свернуть или развернуть", "Collapse or expand"],
 	"hide": ["Скрыть · H", "Hide · H"],
 	"lang_button": ["English", "Русский"],
 	"hint_touch": ["Коснись света.", "Touch the light."],
@@ -185,10 +186,10 @@ const PARTICLES := [
 # ---------------------------------------------------------------- эпохи
 
 const EPOCHS := [
-	["Эпоха I", "Кварк-глюонная плазма", "первая микросекунда",
-		"Epoch I", "Quark–Gluon Plasma", "the first microsecond"],
-	["Эпоха II", "Рождение нуклонов", "от микросекунды до минуты",
-		"Epoch II", "Birth of Nucleons", "from a microsecond to a minute"],
+	["Эпоха I", "Кварк-глюонная плазма", "первые десятки микросекунд",
+		"Epoch I", "Quark–Gluon Plasma", "the first tens of microseconds"],
+	["Эпоха II", "Рождение нуклонов", "от десятков микросекунд до минуты",
+		"Epoch II", "Birth of Nucleons", "from tens of microseconds to a minute"],
 	["Эпоха III", "Первичный нуклеосинтез", "первые минуты",
 		"Epoch III", "Primordial Nucleosynthesis", "the first minutes"],
 	["Интерлюдия", "Долгое остывание", "сотни тысяч лет",
@@ -240,16 +241,16 @@ const LINES := {
 		"Hadronization. Quarks join in threes to form protons and neutrons."],
 	"neutrinos": ["Нейтрино перестают взаимодействовать с веществом и свободно разлетаются. Они летят до сих пор.",
 		"Neutrinos stop interacting with matter and stream away freely. They are still travelling today."],
-	"freeze": ["Слабые реакции прекращаются. На шесть протонов приходится примерно один нейтрон, и свободные нейтроны уже начали распадаться.",
-		"The weak interaction freezes out. About one neutron for every six protons, and the decay clock is already ticking."],
-	"annihilation": ["Электроны и позитроны аннигилируют. Остаётся лишь крошечный избыток электронов — примерно один на два миллиарда фотонов.",
-		"Electrons and positrons annihilate. Only a tiny excess of electrons survives: about one for every two billion photons."],
+	"freeze": ["Слабые реакции прекращаются. В нашей Вселенной на шесть протонов приходится примерно один нейтрон, и свободные нейтроны уже начали распадаться.",
+		"The weak interaction freezes out. In our Universe that leaves about one neutron for every six protons, and the decay clock is already ticking."],
+	"annihilation": ["Электроны и позитроны аннигилируют. Остаётся лишь крошечный избыток электронов — в нашей Вселенной примерно один на два миллиарда фотонов.",
+		"Electrons and positrons annihilate. Only a tiny excess of electrons survives: in our Universe, about one for every two billion photons."],
 	"bottleneck": ["Дейтериевый барьер: дейтроны образуются, но свет тут же их разбивает.",
 		"The deuterium bottleneck: deuterons form, but light smashes them at once."],
 	"d_survives": ["Барьер пройден: свет больше не разбивает дейтерий, и он почти сразу превращается в гелий.",
 		"The bottleneck breaks. Deuterium survives, and almost immediately burns into helium."],
-	"helium": ["Почти все уцелевшие нейтроны теперь в ядрах гелия. Гелий — это четверть всей массы вещества.",
-		"Nearly all surviving neutrons are now locked up in helium nuclei. Helium makes up a quarter of all matter by mass."],
+	"helium": ["Почти все уцелевшие нейтроны теперь в ядрах гелия. В нашей Вселенной гелий — четверть массы обычного вещества.",
+		"Nearly all surviving neutrons are now locked up in helium nuclei. In our Universe, helium is a quarter of all ordinary matter by mass."],
 	"bbn_done": ["Ядерные реакции затихают. Состав вещества больше не изменится, пока не зажгутся первые звёзды.",
 		"Nuclear reactions fade out. The Universe’s composition is now set, until the first stars are born."],
 	"long": ["Вселенную заполняет горячий туман из света, электронов и ядер. Фотон не может уйти далеко: его снова и снова рассеивают электроны.",
@@ -266,6 +267,14 @@ const LINES := {
 		"The Dark Ages. The light reddens and fades. Gravity slowly gathers clouds for the first stars…"],
 	"gather": ["Сгущения растут: гравитация стягивает в них всё больше вещества. Там, где ты касался плазмы, через сотню миллионов лет зажгутся первые звёзды.",
 		"The clumps grow as space expands, and gravity draws matter into them. Where you touched the plasma, the first stars will ignite a hundred million years from now."],
+	"ring": ["Твои сгущения дышат: свет давит на вещество, гравитация тянет обратно, и по плазме бегут звуковые волны.",
+		"Your clumps are breathing: light pushes matter out, gravity pulls it back, and sound waves ripple through the plasma."],
+	"silk": ["Свет просачивается из сгущений и размывает их. Но тёмная материя со светом не взаимодействует — её сгущения никуда не делись.",
+		"Light leaks out of the clumps and smears them away. But dark matter ignores light, and its clumps are still there."],
+	"hint_dark_fast": ["Расширение растаскивает вещество быстрее, чем гравитация успевает его собрать: сгущения почти не растут.",
+		"Expansion pulls matter apart faster than gravity can gather it: the clumps barely grow."],
+	"hint_dark_slow": ["Расширение замедлилось — и гравитация берёт своё: сгущения быстро схлопываются.",
+		"Expansion has slowed, and gravity takes over: the clumps collapse quickly."],
 	"hint_slow": ["Расширение медленное — нейтроны успевают распасться, гелия будет меньше.",
 		"Slow expansion: neutrons have time to decay, so there will be less helium."],
 	"hint_fast": ["Расширение быстрое — нейтроны не успевают распасться, гелия будет больше.",

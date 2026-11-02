@@ -57,6 +57,7 @@ var _lb_speed: Label
 var _lb_music: Label
 var _btn_pause: Button
 var _btn_auto: Button
+var _codex_head: Label
 
 var _lines: Array[String] = []
 var _line_timer := 0.0
@@ -109,6 +110,10 @@ func _make_fonts() -> void:
 		Fmt.sup_minus = "¯"
 	if OS.has_feature("web") or not font_regular.has_char(0x2192):
 		Fmt.arrow = "»"
+	# Во встроенном шрифте веб-сборки нет треугольных стрелок.
+	if OS.has_feature("web"):
+		Fmt.fold_open = "–"
+		Fmt.fold_closed = "+"
 
 
 func _dot_tex(size: int, col: Color) -> ImageTexture:
@@ -225,6 +230,7 @@ func _build_composition() -> void:
 	v.add_child(_composition)
 	panel.add_child(v)
 	_root.add_child(panel)
+	_collapsible(panel, v, "composition")
 
 
 func _slider_row(parent: VBoxContainer, title: String, mn: float, mx: float, step: float, value: float) -> Array:
@@ -322,6 +328,7 @@ func _build_controls() -> void:
 	v.add_child(hint)
 	panel.add_child(v)
 	_root.add_child(panel)
+	_collapsible(panel, v, "controls")
 	_refresh_slider_labels()
 
 
@@ -414,6 +421,7 @@ func _build_codex() -> void:
 	_codex.add_child(v)
 	_codex.modulate.a = 0.0
 	_root.add_child(_codex)
+	_codex_head = _collapsible(_codex, v, "codex")
 
 
 func _build_inspect() -> void:
@@ -434,6 +442,7 @@ func _build_inspect() -> void:
 	v.add_child(_inspect_title)
 	v.add_child(_inspect_text)
 	_inspect.add_child(v)
+	_collapsible(_inspect, v, "inspect")
 	_inspect.visible = false
 	_root.add_child(_inspect)
 
@@ -504,6 +513,64 @@ func _build_end() -> void:
 	_end.add_child(v)
 	_end.visible = false
 	add_child(_end)
+
+
+# ---------------------------------------------------------------- сворачивание панелей
+
+## Панель сворачивается щелчком по заголовку (первая метка в v): остальное содержимое
+## прячется, остаётся одна строка со стрелкой. Состояние запоминается в user://settings.cfg.
+func _collapsible(panel: Control, v: VBoxContainer, key: String) -> Label:
+	var head: Label = v.get_child(0)
+	head.set_meta("base", head.text)
+	head.mouse_filter = Control.MOUSE_FILTER_STOP
+	head.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	head.tooltip_text = I18n.t("fold_tip")
+	head.gui_input.connect(func(ev: InputEvent) -> void:
+		var mb := ev as InputEventMouseButton
+		if mb != null and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+			_set_collapsed(panel, v, not bool(v.get_meta("collapsed", false)))
+			_save_collapsed(key, bool(v.get_meta("collapsed")))
+			head.accept_event())
+	head.mouse_entered.connect(func() -> void: head.modulate = Color(1.3, 1.3, 1.3))
+	head.mouse_exited.connect(func() -> void: head.modulate = Color(1, 1, 1))
+	var cfg := ConfigFile.new()
+	cfg.load(I18n.SETTINGS)
+	_set_collapsed(panel, v, bool(cfg.get_value("ui", "collapsed_" + key, false)))
+	return head
+
+
+func _set_collapsed(panel: Control, v: VBoxContainer, on: bool) -> void:
+	var head: Label = v.get_child(0)
+	for i in range(1, v.get_child_count()):
+		var c := v.get_child(i) as Control
+		if on:
+			# Запоминаем, что было видно: часть содержимого прячется и без сворачивания.
+			if not c.has_meta("was_visible"):
+				c.set_meta("was_visible", c.visible)
+			c.visible = false
+		elif c.has_meta("was_visible"):
+			c.visible = bool(c.get_meta("was_visible"))
+			c.remove_meta("was_visible")
+	v.set_meta("collapsed", on)
+	head.text = String(head.get_meta("base")) + "  " + (Fmt.fold_closed if on else Fmt.fold_open)
+	# Панель сама не сжимается до нового размера содержимого.
+	_fit.call_deferred(panel)
+
+
+## Подогнать панель под содержимое. Панели, растущие вверх от нижнего края
+## (рычаги, «Открыто»), сворачиваются к низу.
+func _fit(panel: Control) -> void:
+	if panel.grow_vertical == Control.GROW_DIRECTION_BEGIN:
+		panel.offset_top = panel.offset_bottom - panel.get_combined_minimum_size().y
+	else:
+		panel.reset_size()
+
+
+func _save_collapsed(key: String, on: bool) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(I18n.SETTINGS)
+	cfg.set_value("ui", "collapsed_" + key, on)
+	cfg.save(I18n.SETTINGS)
 
 
 # ---------------------------------------------------------------- API для main
@@ -623,6 +690,8 @@ func clear_messages() -> void:
 # ---------------------------------------------------------------- реплики и кодекс
 
 func _process(delta: float) -> void:
+	# Пока «Открыто» прозрачно, его заголовок не должен ловить щелчки.
+	_codex_head.mouse_filter = Control.MOUSE_FILTER_STOP if _codex.modulate.a > 0.2 else Control.MOUSE_FILTER_IGNORE
 	# Реплика: проявляется, держится, растворяется; следующая — после паузы.
 	if _line_timer > 0.0:
 		_line_timer -= delta

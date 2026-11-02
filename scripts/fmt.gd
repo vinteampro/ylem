@@ -10,6 +10,8 @@ const SUP := ["⁰", "¹", "²", "³", "⁴", "⁵", "⁶", "⁷", "⁸", "⁹"]
 ## там hud.gd подставляет «¯» и «»».
 static var sup_minus := "⁻"
 static var arrow := "→"
+static var fold_open := "▾"     # стрелки у заголовков сворачиваемых панелей
+static var fold_closed := "▸"
 
 
 static func sup(e: int) -> String:

@@ -514,12 +514,18 @@ func _update_story(_delta: float) -> void:
 	_once("freeze", u.T < 8.0e9)
 	_once("annihilation", u.T < 3.0e9)
 	_once("bottleneck", u.T < 1.6e9 and u.YD < 1.0e-3)
-	_once("d_survives", u.YD > 2.0e-3)
-	_once("helium", u.helium_mass_fraction() > 0.18)
+	_once("d_survives", u.YD > 2.0e-3 or (fired.has("bottleneck") and u.helium_mass_fraction() > 0.01))
+	# В бедных гелием вселенных (медленное расширение) реплика звучит, когда синтез закончился.
+	_once("helium", u.helium_mass_fraction() > 0.18 or (u.T < 4.0e8 and u.helium_mass_fraction() > 0.001))
 	_once("bbn_done", u.T < 2.5e8 and fired.has("helium"))
 	_once("long", u.T < 3.0e6)
 	_once("he_atoms", u.xHe < 0.5)
 	_once("recomb", u.xH < 0.6)
+	# Касания живут по structure.gd: дышат в плазме, свет их размывает, после — растут.
+	if u.T < 2.5e4 and u.T > 8000.0 and not fired.has("ring") and field.count_clumps(0.2) > 0:
+		_once("ring", true)
+	if u.T < 6000.0 and u.T > 3500.0 and not fired.has("silk") and field.count_clumps() > 0:
+		_once("silk", true)
 	_once("transparent", u.ls_found)
 	if not fired.has("imprint") and u.ls_found and u.T < 2600.0:
 		_once("imprint", field.count_clumps() > 0)
@@ -537,6 +543,9 @@ func _update_story(_delta: float) -> void:
 	_once("hint_fast", bbn and u.expansion > 1.3)
 	_once("hint_dense", ep == Epoch.NUCLEO and u.eta_mult > 3.0)
 	_once("hint_sparse", ep == Epoch.NUCLEO and u.eta_mult < 0.33)
+	var dark: bool = u.T < 2600.0 and u.T > 600.0
+	_once("hint_dark_fast", dark and u.expansion > 1.5)
+	_once("hint_dark_slow", dark and u.expansion < 0.6)
 
 	if u.T < 9.0e8 and not fired.has("bbn_params"):
 		fired["bbn_params"] = true
@@ -851,7 +860,7 @@ func _check_end() -> void:
 	if finished or u.T > END_T or u.epoch() != Epoch.DARK:
 		return
 	finished = true
-	print("RESULTS_SHOWN at elapsed=%.1f s, clumps=%d" % [_elapsed, field.count_clumps()])
+	print("RESULTS_SHOWN at elapsed=%.1f s, clumps=%d" % [_elapsed, field.count_clumps(1.0)])
 	if not OS.get_cmdline_user_args().has("--no-results"):
 		_show_results()
 
@@ -868,7 +877,7 @@ func _show_results() -> void:
 		[I18n.t("res_li"), Fmt.sci(u.li7_to_h()), Fmt.sci(1.6e-10)],
 		[I18n.t("res_expansion"), "×" + Fmt.comma("%.2f" % _e_at_bbn), "×" + Fmt.comma("1.00")],
 		[I18n.t("res_eta"), Fmt.sci(UniverseModel.ETA_STD * _eta_at_bbn, 2), Fmt.sci(6.12e-10, 2)],
-		[I18n.t("res_clumps"), str(field.count_clumps()), "—"],
+		[I18n.t("res_clumps"), str(field.count_clumps(1.0)), "—"],
 		[I18n.t("res_transparent"), Fmt.duration(_t_transparent) if _t_transparent > 0.0 else "—", I18n.t("res_transparent_ours")],
 	]
 	hud.show_results(rows, _verdict(yp, dh))
