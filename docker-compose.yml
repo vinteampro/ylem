@@ -19,7 +19,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=services"
-      - "traefik.http.routers.ylem.rule=Host(`ylem.live`) || Host(`www.ylem.live`)"
+      - "traefik.http.routers.ylem.rule=Host(`ylem.live`)"
       - "traefik.http.routers.ylem.entrypoints=websecure"
       - "traefik.http.routers.ylem.tls.certresolver=myresolver"
       - "traefik.http.routers.ylem.service=ylem@docker"
