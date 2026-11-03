@@ -1,6 +1,5 @@
 # Релиз по тегу: git tag v1.2.3 && git push origin v1.2.3
-# Собирает Windows / Linux / Web, выкладывает на itch.io через butler,
-# создаёт GitHub Release и выкладывает веб-версию на ylem.live (self-hosted runner на Mac Mini).
+# Собирает Windows / Linux / Web, выкладывает на itch.io через butler
 name: Release
 
 on:
@@ -108,8 +107,7 @@ jobs:
             --title "Ylem $VERSION" --generate-notes \
             || gh release upload "$GITHUB_REF_NAME" dist/* --clobber
 
-  # Веб-версия на ylem.live: раннер стоит на Mac Mini рядом с Traefik,
-  # образ собирается и запускается там же, без registry и SSH (как у battle_city).
+  # Веб-версия на ylem.live
   deploy-web:
     if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'vinteampro/ylem'
     needs: build
