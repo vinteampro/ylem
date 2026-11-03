@@ -28,7 +28,7 @@ services:
       options:
         max-size: "5m"
         max-file: "3"
-я же сказ
+
 networks:
   services:
     external: true
