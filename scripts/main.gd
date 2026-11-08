@@ -780,6 +780,17 @@ func _run_demo() -> void:
 			e = lerpf(0.3, 0.97, (_elapsed - 10.0) / 2.0)
 		if _elapsed > 3.0 and absf(hud._sl_exp.value - e) > 0.005 and _elapsed < 12.5:
 			hud._sl_exp.value = e
+	elif _demo == "steps":
+		# Ползунок расширения ступеньками, с паузами — чтобы прогноз успевал пересчитаться:
+		# 1 → 1,8 → 0,5 → 1.
+		var plan := [[3.0, 1.0], [4.0, 1.8], [9.0, 1.8], [10.0, 0.5], [16.0, 0.5], [17.0, 1.0]]
+		var e := 1.0
+		for i in range(1, plan.size()):
+			if _elapsed >= plan[i - 1][0] and _elapsed < plan[i][0]:
+				var k: float = (_elapsed - plan[i - 1][0]) / (plan[i][0] - plan[i - 1][0])
+				e = lerpf(plan[i - 1][1], plan[i][1], smoothstep(0.0, 1.0, k))
+		if _elapsed > 3.0 and _elapsed < 17.5 and absf(hud._sl_exp.value - e) > 0.005:
+			hud._sl_exp.value = e
 	elif _demo == "press":
 		field.set_hand(get_viewport_rect().size * Vector2(0.5, 0.42), 1 if _elapsed > 1.0 else 0)
 	elif _demo == "follow" and _elapsed > 3.0:
