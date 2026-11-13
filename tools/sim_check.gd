@@ -47,8 +47,11 @@ func _run_bbn(e: float, eta_mult: float, dn: float, substep := 0.01):
 	u.eta_mult = eta_mult
 	u.dN_extra = dn
 	u.substep = substep
+	var steps := 0
 	while u.T > 1.0e7:
-		u.advance(0.05)
+		steps += 1
+		if not _advance(u, 0.05, steps):
+			break
 		u.take_events()
 	return u
 
@@ -90,8 +93,11 @@ func _check_recombination() -> void:
 	var t_bbn := 0.0
 	var z_half := 0.0
 	var nu_ratio: float = 0.0
+	var steps := 0
 	while u.T > 300.0:
-		u.advance(0.01)
+		steps += 1
+		if not _advance(u, 0.01, steps):
+			break
 		u.take_events()
 		if t_hadron == 0.0 and u.hadron > 0.5:
 			t_hadron = u.t
@@ -121,8 +127,11 @@ func _check_levers() -> void:
 		var u = UniverseModel.new()
 		u.expansion = cfg[0]
 		u.eta_mult = cfg[1]
+		var steps := 0
 		while u.T > 300.0:
-			u.advance(0.02)
+			steps += 1
+			if not _advance(u, 0.02, steps):
+				break
 			u.take_events()
 		print("   расширение ×%.1f, плотность ×%.1f:  Yp = %.4f  D/H = %s  ³He/H = %s  ⁷Li/H = %s  прозрачность: z* = %.0f, %.0f тыс. лет" % [
 			cfg[0], cfg[1], u.helium_mass_fraction(), _e(u.d_to_h()), _e(u.he3_to_h()), _e(u.li7_to_h()), u.z_ls, u.t_ls / 3.156e10])
@@ -141,3 +150,11 @@ func _e(v: float) -> String:
 		return "0"
 	var ex := floori(log(v) / log(10.0))
 	return "%.2fe%d" % [v / pow(10.0, ex), ex]
+
+
+func _advance(u, step: float, count: int) -> bool:
+	if count > 20000 or not u.advance(step):
+		_fails += 1
+		printerr("FAIL: evolution did not reach its checkpoint: " + u.numerical_error)
+		return false
+	return true

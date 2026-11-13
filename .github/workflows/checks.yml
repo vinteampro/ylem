@@ -1,0 +1,43 @@
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  physics-and-scene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GODOT_VERSION: "4.7.2"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download Godot
+        run: |
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          FILE="Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          mkdir -p "$RUNNER_TEMP/godot"
+          cd "$RUNNER_TEMP/godot"
+          curl -fsSL -O "$BASE/$FILE"
+          curl -fsSL -O "$BASE/SHA512-SUMS.txt"
+          awk -v file="$FILE" '$2 == file {print}' SHA512-SUMS.txt > selected.sha512
+          test -s selected.sha512
+          sha512sum -c selected.sha512
+          unzip -q "$FILE"
+          echo "GODOT=$RUNNER_TEMP/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64" >> "$GITHUB_ENV"
+      - name: Physics, particles and scene contracts
+        run: python3 tools/check.py
+      - name: Check logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: check-logs
+          path: build/checks/*.log
