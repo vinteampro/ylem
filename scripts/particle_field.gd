@@ -1,10 +1,10 @@
 extends Node2D
 ## Видимые частицы, камера и «рука» игрока.
 ##
-## На экране — «выборка» из физической модели: ~1000 барионов (больше или меньше —
-## в зависимости от плотности вещества). События модели задают анимации, а её
-## текущее состояние — состав выборки. Периодическая сверка устраняет погрешность
-## округления, группировки изотопов и пропуски анимаций при больших шагах.
+## The screen shows a sample of the physics model: about 1000 baryons, scaled
+## by matter density. Model events drive animations; the current model state
+## determines the sample composition. Periodic reconciliation corrects rounding,
+## isotope grouping and animations skipped during large steps.
 ##
 ## Мир — прямоугольник чуть больше экрана (box). Камера своя: зум, панорама,
 ## параллакс по глубине частиц. Рисуется всё через MultiMesh с аддитивным

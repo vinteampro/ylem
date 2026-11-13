@@ -59,10 +59,10 @@ jobs:
           unzip -q /tmp/templates.tpz -d /tmp/tpl
           mv /tmp/tpl/templates ~/.local/share/godot/export_templates/"${GODOT_VERSION}.stable"
 
-      - name: Проверка физики, частиц и сцены перед экспортом
+      - name: Check physics, particles and scene before export
         run: python3 tools/check.py --godot ~/godot/godot
 
-      - name: Логи проверок
+      - name: Upload check logs
         if: always()
         uses: actions/upload-artifact@v7
         with:

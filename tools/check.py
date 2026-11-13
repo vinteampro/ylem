@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ERROR = re.compile(r"(?:SCRIPT ERROR:|ERROR:|FAIL:|ObjectDB instances (?:were )?leaked|resources still in use)")
 CASES = (
     ("import", ["--editor", "--import"], "", 180),
-    ("physics", ["--script", "res://tools/sim_check.gd"], "ИТОГ: всё в допусках", 180),
+    ("physics", ["--script", "res://tools/sim_check.gd"], "RESULT: all within tolerance", 180),
     ("model", ["--script", "res://tools/model_contract_check.gd"], "MODEL CONTRACTS:", 180),
     ("consistency", ["--script", "res://tools/consistency_check.gd"], "CONSISTENCY:", 180),
     ("lifecycle", ["--script", "res://tools/lifecycle_check.gd", "--", "--no-music", "--no-results"], "LIFECYCLE:", 90),
