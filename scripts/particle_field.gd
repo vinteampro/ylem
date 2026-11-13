@@ -1,9 +1,10 @@
 extends Node2D
 ## Видимые частицы, камера и «рука» игрока.
 ##
-## На экране — «выборка» из физической модели: ~1000 барионов (больше или меньше —
-## в зависимости от плотности вещества). Модель сообщает, сколько реакций каждого
-## типа произошло, и поле разыгрывает ровно столько слияний и распадов со вспышками.
+## The screen shows a sample of the physics model: about 1000 baryons, scaled
+## by matter density. Model events drive animations; the current model state
+## determines the sample composition. Periodic reconciliation corrects rounding,
+## isotope grouping and animations skipped during large steps.
 ##
 ## Мир — прямоугольник чуть больше экрана (box). Камера своя: зум, панорама,
 ## параллакс по глубине частиц. Рисуется всё через MultiMesh с аддитивным
@@ -16,18 +17,26 @@ extends Node2D
 signal reaction_shown(channel: String, pos: Vector2)
 signal species_seen(kind: int)
 signal follow_changed(active: bool)
+signal follow_ended
 
 const Fmt := preload("res://scripts/fmt.gd")
 const I18n := preload("res://scripts/i18n.gd")
 const Structure := preload("res://scripts/structure.gd")
+const Chemistry := preload("res://scripts/particle_chemistry.gd")
+const UniverseModel := preload("res://scripts/universe.gd")
 
-enum K { QR, QG, QB, P, N, D, HE3, HE4, LI7, E, H, HE }
+const K = Chemistry.K
 
-const KIND_COUNT := 12
+const KIND_COUNT := Chemistry.KIND_COUNT
 const CAP := 5200
 const BASE_BARYONS := 1000
 const MAX_FLASH := 192
 const MAX_ANIM_PER_FRAME := 10
+const MAX_REACTIONS_PER_FRAME := 80
+const RECONCILE_INTERVAL := 0.5
+const CORRECTIONS_PER_SECOND := 2400.0
+const MAX_CORRECTIONS_PER_FRAME := 128
+const MAX_PENDING_EVENTS := 5200.0
 const FLOATS := 12  # 8 на Transform2D + 4 на цвет
 
 ## Множитель яркости всех частиц. В браузере кадр не хранит яркость выше 1,
@@ -37,7 +46,7 @@ const BOX_SCALE := 1.2
 const GW := 64
 const GH := 36
 const HAND_R := 150.0
-const TAU_N := 879.4
+const TAU_N := UniverseModel.TAU_N
 
 const COLORS := [
 	Color(2.4, 0.55, 0.5),   # кварк «красный»
@@ -54,8 +63,8 @@ const COLORS := [
 	Color(2.4, 1.9, 1.0),    # атом гелия
 ]
 const SIZES := [6.0, 6.0, 6.0, 10.0, 10.0, 13.0, 14.0, 17.0, 19.0, 4.0, 12.0, 16.0]
-const CHARGE := [0, 0, 0, 1, 0, 1, 2, 2, 3, -1, 0, 0]
-const BARYON := [1, 1, 1, 3, 3, 6, 9, 12, 21, 0, 3, 12]  # в третях: кварк = 1/3 бариона
+const CHARGE = Chemistry.CHARGE
+const BARYON = Chemistry.BARYON
 # Состояние частиц (фиксированные слоты, чтобы индексы не «плыли»).
 var alive := PackedByteArray()
 var busy := PackedByteArray()
@@ -81,6 +90,13 @@ var bonds: Array[Dictionary] = []
 var flashes: Array[Dictionary] = []
 var streaks: Array[Dictionary] = []
 var acc: Dictionary = {}
+var _reconcile_timer := RECONCILE_INTERVAL
+var _reconciling := false
+var _resync_requested := false
+var reconciliations := 0
+var event_overflows := 0
+var invalid_events := 0
+var _reaction_cursor := 0
 
 # Параметры, которые выставляет main по состоянию модели.
 var heat := 1.0
@@ -132,7 +148,6 @@ var _grad_y := PackedFloat32Array()
 var _fluct_dirty := true
 var _fluct_timer := 0.0
 
-var _electrons_ready := false
 var _flicker_acc := 0.0
 var _core_mm: MultiMesh
 var _halo_mm: MultiMesh
@@ -241,9 +256,15 @@ func _alloc() -> void:
 	flashes.clear()
 	streaks.clear()
 	acc.clear()
+	_reconcile_timer = RECONCILE_INTERVAL
+	_reconciling = false
+	_resync_requested = false
+	reconciliations = 0
+	event_overflows = 0
+	invalid_events = 0
+	_reaction_cursor = 0
 	follow = -1
 	follow_log.clear()
-	_electrons_ready = false
 
 
 func _update_view() -> void:
@@ -271,30 +292,13 @@ func reset_field() -> void:
 func rebuild_from(u) -> void:
 	_update_view()
 	_alloc()
-	var total := roundi(baryons_target)
-	var nuc := roundi(u.hadron * total)
-	for b in total - nuc:
-		_spawn_triple(_rand_pos(), false)
-	if nuc <= 0:
-		return
-	var n_d := roundi(u.YD * nuc)
-	var n_3 := roundi(u.Y3 * nuc)
-	var n_4 := roundi(u.Y4 * nuc)
-	var n_7 := roundi(u.Y7 * nuc)
-	var n_n := roundi(u.Yn * nuc)
-	var n_p := maxi(0, nuc - n_n - 2 * n_d - 3 * n_3 - 4 * n_4 - 7 * n_7)
-	var atoms_h := 0
-	var atoms_he := 0
-	if u.T < 3.0e5:
-		atoms_h = roundi((1.0 - u.xH) * n_p)
-		atoms_he = roundi((1.0 - u.xHe) * n_4)
-	var plan := [[K.P, n_p - atoms_h], [K.H, atoms_h], [K.N, n_n], [K.D, n_d], [K.HE3, n_3],
-		[K.HE4, n_4 - atoms_he], [K.HE, atoms_he], [K.LI7, n_7]]
-	for item in plan:
-		for i in int(item[1]):
-			_spawn(int(item[0]), _rand_pos(), _rand_vel(40.0), false)
-	if u.T < 2.0e5:
-		_ensure_electrons()
+	sync(u)
+	baryons_nominal = baryons_target
+	var target := Chemistry.sample(u, roundi(baryons_nominal))
+	for k in KIND_COUNT:
+		for i in target[k]:
+			_spawn(k, _rand_pos(), _rand_vel(40.0), false)
+	_rebuild_lists()
 
 
 ## Большой взрыв: частицы рождаются из плазмы не разом, а вразброс за spread секунд.
@@ -309,16 +313,6 @@ func stagger_birth(spread: float) -> void:
 func _spawn_triple(center: Vector2, fade_in: bool) -> void:
 	for c in 3:
 		_spawn(K.QR + c, center + _rand_vel(30.0), _rand_vel(60.0), false, fade_in)
-
-
-func _ensure_electrons() -> void:
-	_electrons_ready = true
-	var charge := 0
-	for i in CAP:
-		if alive[i] == 1:
-			charge += CHARGE[kind[i]]
-	for i in maxi(0, charge):
-		_spawn(K.E, _rand_pos(), _rand_vel(120.0), false)
 
 
 func _rand_pos() -> Vector2:
@@ -378,8 +372,6 @@ func sync(u) -> void:
 	n_fraction = u.Yn / maxf(u.Yn + u.Yp, 1.0e-9)
 	n_clock = clampf(u.t / TAU_N, 0.0, 3.0)
 	electron_alpha = clampf((5.3 - lt) / 0.6, 0.0, 1.0)
-	if electron_alpha > 0.0 and not _electrons_ready:
-		_ensure_electrons()
 	atom_dim = clampf((lt - 2.5) / 1.1, 0.16, 1.0)
 	# Сгущения растут по structure.gd; здесь — только то, насколько вещество уже
 	# свободно от света и частицы могут стекаться к сгущениям.
@@ -392,7 +384,24 @@ func sync(u) -> void:
 
 func apply_events(ev: Dictionary) -> void:
 	for ch in ev.keys():
-		acc[ch] = clampf(float(acc.get(ch, 0.0)) + float(ev[ch]) * baryons_nominal, -60.0, 60.0)
+		if ch not in ["hadron", "n_to_p"] and not Chemistry.RULES.has(ch):
+			invalid_events += 1
+			push_error("Unknown visual reaction: " + str(ch))
+			continue
+		var amount := float(ev[ch]) * baryons_nominal
+		if not is_finite(amount):
+			invalid_events += 1
+			push_error("Non-finite visual reaction: " + str(ch))
+			continue
+		if _resync_requested:
+			continue # the current model snapshot supersedes this animation backlog
+		var pending := float(acc.get(ch, 0.0)) + amount
+		if absf(pending) > MAX_PENDING_EVENTS:
+			event_overflows += 1
+			_resync_requested = true
+			acc.clear()
+		else:
+			acc[ch] = pending
 
 
 # ---------------------------------------------------------------- камера
@@ -604,10 +613,7 @@ func _process(delta: float) -> void:
 		hand_vel = hand_vel.lerp((hand_screen - _hand_prev) / delta, 0.25).limit_length(2500.0)
 	_hand_prev = hand_screen
 	_update_camera(delta)
-	_rebuild_lists()
-	_adjust_population(delta)
-	_run_reactions()
-	_update_bonds(delta)
+	step_chemistry(delta)
 	_update_flicker(delta)
 	_paint_hand(delta)
 	_update_fluct_texture(delta)
@@ -658,6 +664,9 @@ func _pick(k: int) -> int:
 		var i := _order[_start[k] + randi() % n]
 		if _valid(i, k):
 			return i
+	for i in CAP:
+		if _valid(i, k):
+			return i
 	return -1
 
 
@@ -676,248 +685,214 @@ func _nearest(k: int, from: Vector2) -> int:
 		if d < best_d:
 			best_d = d
 			best = i
+	if best < 0:
+		return _pick(k)
 	return best
 
 
-# Плотность вещества меняет число частиц на экране: плавно добавляем или убираем.
-func _adjust_population(delta: float) -> void:
+## The rendering clock only controls how quickly a finite sample catches up.
+## Finish in-flight bonds before rebasing, then clear events represented by that
+## snapshot. No chemistry is inferred from random cloning or frame frequency.
+func step_chemistry(delta: float) -> void:
+	_update_bonds(delta)
+	_rebuild_lists()
 	baryons_nominal = lerpf(baryons_nominal, baryons_target, 1.0 - exp(-0.8 * delta))
-	var thirds := 0
+	_reconcile_timer -= delta
+	if _struct_u != null and (_reconciling or _resync_requested or _reconcile_timer <= 0.0):
+		_reconciling = true
+		if not bonds.is_empty():
+			return
+		acc.clear()
+		var target := Chemistry.sample(_struct_u, roundi(baryons_nominal))
+		var budget := clampi(ceili(CORRECTIONS_PER_SECOND * delta), 1, MAX_CORRECTIONS_PER_FRAME)
+		_reconcile_sample(target, budget)
+		if counts == target:
+			_reconciling = false
+			_resync_requested = false
+			_reconcile_timer = RECONCILE_INTERVAL
+			reconciliations += 1
+		return
+	_run_reactions()
+
+
+func _reconcile_sample(target: PackedInt32Array, budget: int) -> void:
+	# Keep every unaffected slot, especially the particle being followed. A
+	# representative absent from the new sample ends observation explicitly;
+	# resampling must never invent a reaction in its history.
 	for k in KIND_COUNT:
-		thirds += counts[k] * BARYON[k]
-	var diff := baryons_nominal - thirds / 3.0
-	if absf(diff) < 8.0:
-		return
-	for n in mini(int(absf(diff) / 4.0) + 1, 5):
-		if diff > 0.0:
-			_clone_random()
-		else:
-			_remove_random()
-
-
-func _random_baryonic() -> int:
-	for t in 24:
-		var i := randi() % CAP
-		if alive[i] == 1 and busy[i] == 0 and kind[i] != K.E and i != follow:
-			return i
-	return -1
-
-
-func _clone_random() -> void:
-	var i := _random_baryonic()
-	if i < 0:
-		return
-	var k := kind[i]
-	var p := _rand_pos()
-	if k <= K.QB:
-		_spawn_triple(p, true)
-		return
-	_spawn(k, p, _rand_vel(40.0), false, true)
-	if _electrons_ready:
-		for c in maxi(0, CHARGE[k]):
-			_spawn(K.E, p + _rand_vel(40.0), _rand_vel(120.0), false, true)
-
-
-func _remove_random() -> void:
-	var i := _random_baryonic()
-	if i < 0:
-		return
-	var k := kind[i]
-	if k <= K.QB:
-		for c in 3:
-			_fade_out(_pick(K.QR + c))
-		return
-	_fade_out(i)
-	if _electrons_ready:
-		for c in maxi(0, CHARGE[k]):
-			_fade_out(_pick(K.E))
-
-
-func _fade_out(i: int) -> void:
-	if i < 0 or i == follow:
-		return
-	busy[i] = 1
-	dying[i] = 1
+		if counts[k] <= target[k]:
+			continue
+		for i in range(CAP - 1, -1, -1):
+			if budget == 0 or counts[k] <= target[k]:
+				break
+			if alive[i] == 1 and busy[i] == 0 and kind[i] == k and i != follow:
+				_kill(i)
+				counts[k] -= 1
+				budget -= 1
+		if budget > 0 and counts[k] > target[k] and follow >= 0 and kind[follow] == k:
+			_kill(follow)
+			counts[k] -= 1
+			budget -= 1
+			follow_ended.emit()
+	for k in KIND_COUNT:
+		while counts[k] < target[k] and budget > 0 and not _free.is_empty():
+			_spawn(k, _rand_pos(), _rand_vel(40.0), true, true)
+			counts[k] += 1
+			budget -= 1
 
 
 func _run_reactions() -> void:
+	var channels := acc.keys()
+	if channels.is_empty():
+		return
 	var budget := MAX_ANIM_PER_FRAME
-	for ch in acc.keys():
-		var a: float = acc[ch]
-		var guard := 0
-		while a >= 1.0 and guard < 80:
-			guard += 1
-			if not _react(ch, 1, budget <= 0):
-				break
-			a -= 1.0
+	var stalled := 0
+	# A global work bound and round-robin scheduling prevent a hot channel from
+	# starving the others. Unfinished work is kept until executed or rebased.
+	for operation in MAX_REACTIONS_PER_FRAME:
+		_reaction_cursor %= channels.size()
+		var ch: String = channels[_reaction_cursor]
+		_reaction_cursor += 1
+		var amount: float = acc[ch]
+		if absf(amount) >= 1.0 and _react(ch, 1 if amount > 0.0 else -1, budget <= 0):
+			acc[ch] = amount - signf(amount)
 			budget -= 1
-		while a <= -1.0 and guard < 80:
-			guard += 1
-			if not _react(ch, -1, budget <= 0):
+			stalled = 0
+		else:
+			stalled += 1
+			if stalled >= channels.size():
 				break
-			a += 1.0
-			budget -= 1
-		acc[ch] = a
 
 
-func _react(ch: String, dir: int, instant: bool) -> bool:
+func _react(ch: String, direction: int, instant: bool) -> bool:
+	var pair: Array
+	if ch == "hadron":
+		var nucleon := K.N if randf() < n_fraction else K.P
+		if direction < 0 and _pick(nucleon) < 0:
+			nucleon = K.P if nucleon == K.N else K.N
+		pair = [[K.QR, K.QG, K.QB], [nucleon]]
+		if direction < 0:
+			pair = [pair[1], pair[0]]
+	elif ch == "n_to_p":
+		pair = [[K.N], [K.P]] if direction > 0 else [[K.P], [K.N]]
+	else:
+		pair = Chemistry.rule(ch, direction)
+	if pair.is_empty():
+		return false
+	var inputs: Array = pair[0]
+	var outputs: Array = pair[1]
+	# Capacity is checked BEFORE consuming anything, including a followed source.
+	if _free.size() + inputs.size() < outputs.size():
+		return false
+	var members := PackedInt32Array()
+	for k in inputs:
+		var index := _pick(k) if members.is_empty() else _nearest(k, pos[members[0]])
+		if index < 0:
+			for reserved in members:
+				busy[reserved] = 0
+			return false
+		busy[index] = 1
+		members.append(index)
+	var center := Vector2.ZERO
+	for index in members:
+		center += pos[index]
+	center /= members.size()
+	var style := _reaction_style(ch, direction)
+	var bond := {"m": members, "c": center, "t": 0.0, "dur": randf_range(0.45, 0.85),
+		"out": outputs, "col": style[0], "size": style[1], "cause": style[2],
+		"ch": ch if direction > 0 and not ch.ends_with("_melt") else ch + "_split", "d": depth[members[0]]}
+	if instant or inputs.size() == 1 or outputs.size() > inputs.size():
+		_finish_bond(bond, not instant)
+	else:
+		bonds.append(bond)
+	return true
+
+
+func _reaction_style(ch: String, direction: int) -> Array:
+	var col := Color(1.8, 1.4, 2.6)
+	var size := 1
+	var cause := "c_nuclear"
+	if ch in ["pn_D", "Dp", "Dn", "A3n", "A3p", "Li"]:
+		cause = "c_fusion" if direction > 0 else "c_photo"
+	elif direction > 0 and ch in ["DDn", "DDp", "A3Dn", "A3Dp", "He3He3"]:
+		cause = "c_fusion"
 	match ch:
 		"hadron":
-			if dir > 0:
-				var product := K.N if randf() < n_fraction else K.P
-				return _bond([K.QR, K.QG, K.QB], product, -1, Color(1.7, 1.4, 2.4), 0, ch, instant, "c_quarks")
-			return _split([K.P, K.N] if randf() < 0.5 else [K.N, K.P], [K.QR, K.QG, K.QB], Color(1.5, 1.2, 2.6), ch, "c_melted")
+			col = Color(1.7, 1.4, 2.4) if direction > 0 else Color(1.5, 1.2, 2.6)
+			size = 0
+			cause = "c_quarks" if direction > 0 else "c_melted"
 		"n_to_p":
-			if dir > 0:
-				return _transmute(K.N, K.P, Color(0.6, 1.2, 2.0), true)
-			return _transmute(K.P, K.N, Color(1.2, 1.0, 1.8), false)
+			col = Color(0.6, 1.2, 2.0) if direction > 0 else Color(1.2, 1.0, 1.8)
+			size = 0
+			cause = "c_weak"
 		"pn_D":
-			if dir > 0:
-				return _bond([K.N, K.P], K.D, -1, Color(0.9, 2.0, 2.4), 1, ch, instant, "c_fusion")
-			return _split([K.D], [K.P, K.N], Color(1.5, 1.8, 2.6), ch, "c_photo")
-		# Ядра с A = 3 на экране одного вида: тритий показан как гелий-3 (потом он им и станет).
-		"DDn":
-			return _bond([K.D, K.D], K.HE3, K.N, Color(1.8, 1.4, 2.6), 1, ch, instant, "c_fusion")
-		"DDp":
-			return _bond([K.D, K.D], K.HE3, K.P, Color(1.8, 1.4, 2.6), 1, ch, instant, "c_fusion")
-		"Dp":
-			return _bond([K.D, K.P], K.HE3, -1, Color(1.8, 1.4, 2.6), 1, ch, instant, "c_fusion")
-		"Dn":
-			return _bond([K.D, K.N], K.HE3, -1, Color(1.8, 1.4, 2.6), 1, ch, instant, "c_fusion")
+			col = Color(0.9, 2.0, 2.4) if direction > 0 else Color(1.5, 1.8, 2.6)
 		"He3n":
-			return _bond([K.HE3, K.N], K.HE3, K.P, Color(1.4, 1.3, 2.4), 1, ch, instant, "c_fusion")
-		"A3Dn":
-			return _bond([K.HE3, K.D], K.HE4, K.N, Color(3.6, 2.6, 1.0), 2, ch, instant, "c_fusion")
-		"A3Dp":
-			return _bond([K.HE3, K.D], K.HE4, K.P, Color(3.6, 2.6, 1.0), 2, ch, instant, "c_fusion")
-		"A3n":
-			return _bond([K.HE3, K.N], K.HE4, -1, Color(3.6, 2.6, 1.0), 2, ch, instant, "c_fusion")
-		"A3p":
-			return _bond([K.HE3, K.P], K.HE4, -1, Color(3.6, 2.6, 1.0), 2, ch, instant, "c_fusion")
+			col = Color(1.4, 1.3, 2.4)
+		"A3Dn", "A3Dp", "A3n", "A3p":
+			col = Color(3.6, 2.6, 1.0)
+			size = 2
 		"Li":
-			return _bond([K.HE4, K.HE3], K.LI7, -1, Color(3.2, 0.8, 1.4), 2, ch, instant, "c_fusion")
+			col = Color(3.2, 0.8, 1.4)
+			size = 2
 		"He_melt":
-			return _split([K.HE4], [K.P, K.P, K.N, K.N], Color(2.6, 2.0, 1.2), ch, "c_broke")
-		"A3_melt":
-			return _split([K.HE3], [K.P, K.P, K.N], Color(2.0, 1.5, 2.4), ch, "c_broke")
-		"Li_melt":
-			return _split([K.LI7], [K.P, K.P, K.P, K.N, K.N, K.N, K.N], Color(2.6, 1.0, 1.4), ch, "c_broke")
-		"recH":
-			if dir > 0:
-				return _bond([K.P, K.E], K.H, -1, Color(3.0, 0.45, 0.55), 1, ch, instant, "c_capture")
-			return _split([K.H], [K.P, K.E], Color(1.0, 0.7, 1.8), ch, "c_ionized")
-		"recHe":
-			if dir > 0:
-				return _bond([K.HE4, K.E, K.E], K.HE, -1, Color(2.8, 2.3, 0.7), 1, ch, instant, "c_capture2")
-			return _split([K.HE], [K.HE4, K.E, K.E], Color(1.6, 1.4, 2.0), ch, "c_ionized")
-	return false
-
-
-## Слияние: участники стягиваются к общему центру, затем рождается продукт.
-func _bond(kinds: Array, product: int, extra: int, col: Color, size_class: int, ch: String, instant: bool, cause: String) -> bool:
-	var first := _pick(kinds[0])
-	if first < 0:
-		return false
-	var members := PackedInt32Array([first])
-	busy[first] = 1
-	for j in range(1, kinds.size()):
-		var m := _nearest(kinds[j], pos[first])
-		if m < 0:
-			for x in members:
-				busy[x] = 0
-			return false
-		busy[m] = 1
-		members.append(m)
-	var center := Vector2.ZERO
-	for x in members:
-		center += pos[x]
-	center /= members.size()
-	var b := {"m": members, "c": center, "t": 0.0, "dur": randf_range(0.45, 0.85), "product": product,
-		"extra": extra, "col": col, "size": size_class, "ch": ch, "d": depth[first], "cause": cause}
-	if instant:
-		_finish_bond(b, false)
-	else:
-		bonds.append(b)
-	return true
+			col = Color(2.6, 2.0, 1.2)
+		"A3_melt", "T_melt":
+			col = Color(2.0, 1.5, 2.4)
+		"Li_melt", "Be_melt":
+			col = Color(2.6, 1.0, 1.4)
+		"recH", "recHe":
+			col = Color(3.0, 0.45, 0.55) if ch == "recH" else Color(2.8, 2.3, 0.7)
+			if direction < 0:
+				col = Color(1.0, 0.7, 1.8) if ch == "recH" else Color(1.6, 1.4, 2.0)
+			cause = ("c_capture" if ch == "recH" else "c_capture2") if direction > 0 else "c_ionized"
+	if ch.ends_with("_melt"):
+		cause = "c_broke" if direction > 0 else "c_fusion"
+	return [col, size, cause]
 
 
 func _finish_bond(b: Dictionary, animated: bool) -> void:
 	var members: PackedInt32Array = b["m"]
+	var outputs: Array = b["out"]
 	var center: Vector2 = b["c"]
-	var followed := members.has(follow) and follow >= 0
+	var followed := follow >= 0 and members.has(follow)
+	var old_kind := kind[follow] if followed else -1
 	var v := Vector2.ZERO
-	for x in members:
-		v += vel[x]
-		_kill(x)
+	for index in members:
+		v += vel[index]
+		_kill(index)
 	v /= members.size()
-	var prod := _spawn(int(b["product"]), center, v * 0.5)
-	if prod >= 0:
-		depth[prod] = b["d"]
-	var extra: int = b["extra"]
-	if extra >= 0:
-		var dir := Vector2.from_angle(randf() * TAU)
-		var e := _spawn(extra, center + dir * 6.0, dir * randf_range(90.0, 160.0))
-		if e >= 0:
-			depth[e] = b["d"]
+	var next_follow := -1
+	for k in outputs:
+		var offset := _rand_vel(6.0) if outputs.size() > 1 else Vector2.ZERO
+		var index := _spawn(k, center + offset, v * 0.5 + offset * 10.0)
+		assert(index >= 0, "Reaction capacity must be reserved before consuming inputs")
+		depth[index] = b["d"]
+		if next_follow < 0 or k == old_kind:
+			next_follow = index
 	if followed:
-		_follow_to(prod, String(b["cause"]))
+		_follow_to(next_follow, String(b["cause"]))
 	if not animated:
 		return
 	var sc: int = b["size"]
 	var col: Color = b["col"]
 	var d: float = b["d"]
+	if members.size() == 1:
+		# Preserve the existing split/weak effects without changing chemistry.
+		if outputs.size() > 1:
+			_flash(center, col, 34.0, 0.5, false, d)
+		else:
+			_flash(center, col, 20.0, 0.4, false, d)
+			if b["ch"] == "n_to_p":
+				_streak(center, Vector2.from_angle(randf() * TAU), Color(0.5, 1.3, 2.2), 0.7, 170.0, 40.0, d)
+		reaction_shown.emit(String(b["ch"]), center)
+		return
 	_flash(center, col, 30.0 + 26.0 * sc, 0.55 + 0.4 * sc, false, d)
 	if sc >= 1:
 		_flash(center, col * 0.6, 34.0 + 46.0 * sc, 1.0 + 0.5 * sc, true, d)
 	if sc >= 2:
 		_gamma(center, col, 3, d)
 	reaction_shown.emit(String(b["ch"]), center)
-
-
-## Распад: частица разлетается на осколки.
-func _split(sources: Array, products: Array, col: Color, ch: String, cause: String) -> bool:
-	var src := -1
-	for k in sources:
-		src = _pick(k)
-		if src >= 0:
-			break
-	if src < 0:
-		return false
-	var c := pos[src]
-	var v := vel[src]
-	var d := depth[src]
-	var followed := src == follow
-	_kill(src)
-	var first := -1
-	for pk in products:
-		var dir := Vector2.from_angle(randf() * TAU)
-		var i := _spawn(int(pk), c + dir * 4.0, v + dir * randf_range(60.0, 130.0))
-		if i >= 0:
-			depth[i] = d
-			if first < 0:
-				first = i
-	if followed:
-		_follow_to(first, cause)
-	_flash(c, col, 34.0, 0.5, false, d)
-	reaction_shown.emit(ch + "_split", c)
-	return true
-
-
-## Превращение одной частицы в другую (бета-распад нейтрона и обратный процесс).
-func _transmute(from: int, to: int, col: Color, beta: bool) -> bool:
-	var i := _pick(from)
-	if i < 0:
-		return false
-	kind[i] = to
-	age[i] = 0.0
-	_mark_seen(to, true)
-	if i == follow:
-		_log_follow("%s — %s %s %s" % [Fmt.duration(cosmic_t), I18n.t("c_beta" if beta else "c_positron"), Fmt.arrow, I18n.particle(to)])
-	_flash(pos[i], col, 20.0, 0.4, false, depth[i])
-	if beta:
-		_streak(pos[i], Vector2.from_angle(randf() * TAU), Color(0.5, 1.3, 2.2), 0.7, 170.0, 40.0, depth[i])
-	reaction_shown.emit("n_to_p" if beta else "p_to_n", pos[i])
-	return true
 
 
 func _update_bonds(delta: float) -> void:

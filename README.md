@@ -162,6 +162,11 @@ earlier, by about 0.5% in redshift.
   nonlinear collapse is not modelled: δ > 1 counts as a collapsed cloud. The sign of the spots on
   the CMB follows the large-scale Sachs–Wolfe effect (an overdensity looks cold). CMB
   anisotropies are amplified about 10,000 times, otherwise they would be invisible;
+- the screen is a finite sample, not a second reaction solver. It groups ³H with ³He
+  and ⁷Be with ⁷Li, rounds nuclei down to whole particles and leaves sub-particle traces
+  in the numeric HUD. Animation can lag the model; periodic bounded reconciliation
+  restores the current composition. Resampling may end an observation without inventing
+  a reaction. See [the consistency contract](docs/physics-visual-consistency.md);
 - quark colours are arbitrary.
 
 ## Project layout
@@ -170,6 +175,7 @@ earlier, by about 0.5% in redshift.
 scenes/main.tscn            — the only scene; everything else is built in code
 scripts/universe.gd         — the physics model (numbers only, no graphics)
 scripts/structure.gd        — clump growth from touches: dark matter, sound in the plasma, Silk damping
+scripts/particle_chemistry.gd — signed visual reactions and finite composition sampling
 scripts/particle_field.gd   — particles, fusions, flashes, gamma rays (MultiMesh + HDR)
 scripts/main.gd             — the director: pacing, epochs, narration, wiring
 scripts/start_screen.gd     — start screen: wake the point with clicks, then the Big Bang
@@ -203,11 +209,22 @@ the end of the frame (`WEB_GAIN`) — otherwise the glow disappears.
 
 ## Development
 
-Check the physics for different parameters:
+Run all required checks with Godot **4.7.2 stable** and Python 3 (standard library only):
 
 ```
-godot --headless --path . --script res://tools/sim_check.gd
+python3 tools/check.py
+# Or: python3 tools/check.py --godot /path/to/godot
 ```
+
+This imports resources, checks the existing AlterBBN/Planck references, numerical
+invariants, signed reactions, finite sampling at 30/60/144 FPS and the actual scene's
+pause/forecast/restart behavior. Logs go to `build/checks/`. Timeouts, engine errors
+and missing success summaries fail the command, even if Godot returns zero.
+The same command runs for pull requests and before release exports.
+
+The standalone reference check remains available:
+`godot --headless --path . --script res://tools/sim_check.gd`.
+Native rendering still needs a visual check; the headless suite does not validate a GPU.
 
 Start at a given temperature and take screenshots:
 

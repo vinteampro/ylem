@@ -33,11 +33,11 @@ var _fails := 0
 func _init() -> void:
 	var t0 := Time.get_ticks_msec()
 	UniverseModel.new()
-	print("таблицы термодинамики и слабых скоростей: %d мс" % (Time.get_ticks_msec() - t0))
+	print("Thermodynamics and weak-rate tables: %d ms" % (Time.get_ticks_msec() - t0))
 	_check_bbn()
 	_check_recombination()
 	_check_levers()
-	print("\nИТОГ: %s" % ("всё в допусках" if _fails == 0 else "%d отклонений за допусками" % _fails))
+	print("\nRESULT: %s" % ("all within tolerance" if _fails == 0 else "%d deviations outside tolerance" % _fails))
 	quit(1 if _fails > 0 else 0)
 
 
@@ -47,15 +47,18 @@ func _run_bbn(e: float, eta_mult: float, dn: float, substep := 0.01):
 	u.eta_mult = eta_mult
 	u.dN_extra = dn
 	u.substep = substep
+	var steps := 0
 	while u.T > 1.0e7:
-		u.advance(0.05)
+		steps += 1
+		if not _advance(u, 0.05, steps):
+			break
 		u.take_events()
 	return u
 
 
 func _check_bbn() -> void:
-	print("\n1. Нуклеосинтез против AlterBBN 2.2")
-	print("   η×    ΔN  |  Yp модель / эталон     |  D/H                    |  ³He/H                  |  ⁷Li/H")
+	print("\n1. Nucleosynthesis compared with AlterBBN 2.2")
+	print("   η×    ΔN  |  Yp model / reference  |  D/H                    |  ³He/H                  |  ⁷Li/H")
 	for ref in ALTERBBN:
 		var t0 := Time.get_ticks_msec()
 		var u = _run_bbn(1.0, ref[0], ref[1])
@@ -66,7 +69,7 @@ func _check_bbn() -> void:
 		for ok in [ok_yp, ok_d, ok_3, ok_li]:
 			if not ok:
 				_fails += 1
-		print("   %4.1f %4.0f  |  %.4f / %.4f %s  |  %s / %s %s %+4.0f%%  |  %s / %s %s %+4.0f%%  |  %s / %s %s %+4.0f%%   (%d мс)" % [
+		print("   %4.1f %4.0f  |  %.4f / %.4f %s  |  %s / %s %s %+4.0f%%  |  %s / %s %s %+4.0f%%  |  %s / %s %s %+4.0f%%   (%d ms)" % [
 			ref[0], ref[1], u.helium_mass_fraction(), ref[2], _mark(ok_yp),
 			_e(u.d_to_h()), _e(ref[3]), _mark(ok_d), 100.0 * (u.d_to_h() / ref[3] - 1.0),
 			_e(u.he3_to_h()), _e(ref[4]), _mark(ok_3), 100.0 * (u.he3_to_h() / ref[4] - 1.0),
@@ -80,18 +83,21 @@ func _check_bbn() -> void:
 	var ok: bool = d_yp < 0.001 and d_d < 0.03
 	if not ok:
 		_fails += 1
-	print("   шаг прогноза 0,05 против 0,01: ΔYp = %.4f, ΔD/H = %.1f%% %s" % [d_yp, 100.0 * d_d, _mark(ok)])
+	print("   forecast step 0.05 versus 0.01: ΔYp = %.4f, ΔD/H = %.1f%% %s" % [d_yp, 100.0 * d_d, _mark(ok)])
 
 
 func _check_recombination() -> void:
-	print("\n2. Наша Вселенная от кварков до тёмных веков")
+	print("\n2. Our Universe from quarks to the dark ages")
 	var u = UniverseModel.new()
 	var t_hadron := 0.0
 	var t_bbn := 0.0
 	var z_half := 0.0
 	var nu_ratio: float = 0.0
+	var steps := 0
 	while u.T > 300.0:
-		u.advance(0.01)
+		steps += 1
+		if not _advance(u, 0.01, steps):
+			break
 		u.take_events()
 		if t_hadron == 0.0 and u.hadron > 0.5:
 			t_hadron = u.t
@@ -107,24 +113,27 @@ func _check_recombination() -> void:
 	for ok in [ok_z, ok_nu, ok_x]:
 		if not ok:
 			_fails += 1
-	print("   адронизация (половина кварков в нуклонах): %.1f мкс   (решёточная КХД: ~10–20 мкс)" % (t_hadron * 1.0e6))
-	print("   синтез гелия (половина итога): %.0f с" % t_bbn)
-	print("   T_ν/T после аннигиляции e±: %.4f   ((4/11)^⅓ = %.4f) %s" % [nu_ratio, pow(4.0 / 11.0, 1.0 / 3.0), _mark(ok_nu)])
-	print("   половина водорода нейтральна: z = %.0f" % z_half)
-	print("   пик функции видимости: z* = %.1f, t* = %.0f тыс. лет   (Planck 2018: z* = 1089,8) %s" % [u.z_ls, u.t_ls / 3.156e10, _mark(ok_z)])
-	print("   остаточная ионизация: %s   (RECFAST: ~2–3·10⁻⁴) %s" % [_e(u.xH), _mark(ok_x)])
+	print("   hadronization (half the quarks in nucleons): %.1f us   (lattice QCD: ~10–20 us)" % (t_hadron * 1.0e6))
+	print("   helium synthesis (half the final abundance): %.0f s" % t_bbn)
+	print("   T_ν/T after e± annihilation: %.4f   ((4/11)^⅓ = %.4f) %s" % [nu_ratio, pow(4.0 / 11.0, 1.0 / 3.0), _mark(ok_nu)])
+	print("   half the hydrogen neutral: z = %.0f" % z_half)
+	print("   visibility-function peak: z* = %.1f, t* = %.0f kyr   (Planck 2018: z* = 1089.8) %s" % [u.z_ls, u.t_ls / 3.156e10, _mark(ok_z)])
+	print("   residual ionization: %s   (RECFAST: ~2–3·10⁻⁴) %s" % [_e(u.xH), _mark(ok_x)])
 
 
 func _check_levers() -> void:
-	print("\n3. Рычаги игры (эталона нет: темп расширения умножает H во все эпохи сразу)")
+	print("\n3. Game controls (no reference: the expansion multiplier scales H across all epochs)")
 	for cfg in [[1.0, 1.0], [0.6, 1.0], [1.6, 1.0], [1.0, 0.3], [1.0, 3.0]]:
 		var u = UniverseModel.new()
 		u.expansion = cfg[0]
 		u.eta_mult = cfg[1]
+		var steps := 0
 		while u.T > 300.0:
-			u.advance(0.02)
+			steps += 1
+			if not _advance(u, 0.02, steps):
+				break
 			u.take_events()
-		print("   расширение ×%.1f, плотность ×%.1f:  Yp = %.4f  D/H = %s  ³He/H = %s  ⁷Li/H = %s  прозрачность: z* = %.0f, %.0f тыс. лет" % [
+		print("   expansion ×%.1f, density ×%.1f:  Yp = %.4f  D/H = %s  ³He/H = %s  ⁷Li/H = %s  transparency: z* = %.0f, %.0f kyr" % [
 			cfg[0], cfg[1], u.helium_mass_fraction(), _e(u.d_to_h()), _e(u.he3_to_h()), _e(u.li7_to_h()), u.z_ls, u.t_ls / 3.156e10])
 
 
@@ -141,3 +150,11 @@ func _e(v: float) -> String:
 		return "0"
 	var ex := floori(log(v) / log(10.0))
 	return "%.2fe%d" % [v / pow(10.0, ex), ex]
+
+
+func _advance(u, step: float, count: int) -> bool:
+	if count > 20000 or not u.advance(step):
+		_fails += 1
+		printerr("FAIL: evolution did not reach its checkpoint: " + u.numerical_error)
+		return false
+	return true

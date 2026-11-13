@@ -25,11 +25,7 @@ func _process(_delta: float) -> bool:
 	print("частиц: %d" % (ParticleField.CAP - field._free.size()))
 
 	var sections := {
-		"rebuild_lists": func() -> void: field._rebuild_lists(),
-		"reactions": func() -> void:
-			field._adjust_population(DT)
-			field._run_reactions()
-			field._update_bonds(DT),
+		"chemistry": func() -> void: field.step_chemistry(DT),
 		"move_and_draw": func() -> void: field._move_and_draw(DT),
 		"flashes": func() -> void: field._update_flashes(DT),
 	}

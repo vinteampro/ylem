@@ -71,20 +71,20 @@ const REACTIONS := {
 	13: [ND, 1, NN, 1, NT, 1, -1, 0, 1.65, 72.612, "Dn"],      # D + n → T + γ
 	14: [NHE3, 1, NN, 1, NHE4, 1, -1, 0, 2.63, 238.794, "A3n"], # ³He + n → ⁴He + γ
 	16: [NHE3, 1, NN, 1, NT, 1, NP, 1, 1.001, 8.863, "He3n"],  # ³He + n → T + p
-	17: [NBE7, 1, NN, 1, NLI7, 1, NP, 1, 1.001, 19.080, ""],   # ⁷Be + n → ⁷Li + p
-	19: [NBE7, 1, NN, 1, NHE4, 2, -1, 0, 4.68, 220.382, ""],   # ⁷Be + n → ⁴He + ⁴He
+	17: [NBE7, 1, NN, 1, NLI7, 1, NP, 1, 1.001, 19.080, "Be7n"],   # ⁷Be + n → ⁷Li + p
+	19: [NBE7, 1, NN, 1, NHE4, 2, -1, 0, 4.68, 220.382, "Be7n_He"],   # ⁷Be + n → ⁴He + ⁴He
 	20: [ND, 1, NP, 1, NHE3, 1, -1, 0, 1.65, 63.749, "Dp"],    # D + p → ³He + γ
 	21: [NT, 1, NP, 1, NHE4, 1, -1, 0, 2.63, 229.931, "A3p"],  # T + p → ⁴He + γ
-	24: [NLI7, 1, NP, 1, NHE4, 2, -1, 0, 4.68, 201.302, ""],   # ⁷Li + p → ⁴He + ⁴He
+	24: [NLI7, 1, NP, 1, NHE4, 2, -1, 0, 4.68, 201.302, "Li7p_He"],   # ⁷Li + p → ⁴He + ⁴He
 	26: [NT, 1, NHE4, 1, NLI7, 1, -1, 0, 1.13, 28.629, "Li"],  # T + ⁴He → ⁷Li + γ
 	27: [NHE3, 1, NHE4, 1, NBE7, 1, -1, 0, 1.13, 18.412, "Li"], # ³He + ⁴He → ⁷Be + γ
 	28: [ND, 2, -1, 0, NHE3, 1, NN, 1, 1.73, 37.934, "DDn"],   # D + D → ³He + n
 	29: [ND, 2, -1, 0, NT, 1, NP, 1, 1.73, 46.798, "DDp"],     # D + D → T + p
 	30: [NT, 1, ND, 1, NHE4, 1, NN, 1, 5.51, 204.116, "A3Dn"], # T + D → ⁴He + n
 	31: [NHE3, 1, ND, 1, NHE4, 1, NP, 1, 5.51, 212.979, "A3Dp"], # ³He + D → ⁴He + p
-	32: [NHE3, 2, -1, 0, NHE4, 1, NP, 2, 0.0, 149.229, ""],    # ³He + ³He → ⁴He + 2p
-	33: [NLI7, 1, ND, 1, NHE4, 2, NN, 1, 0.0, 175.487, ""],    # ⁷Li + D → n + 2 ⁴He
-	34: [NBE7, 1, ND, 1, NHE4, 2, NP, 1, 0.0, 194.566, ""],    # ⁷Be + D → p + 2 ⁴He
+	32: [NHE3, 2, -1, 0, NHE4, 1, NP, 2, 0.0, 149.229, "He3He3"],    # ³He + ³He → ⁴He + 2p
+	33: [NLI7, 1, ND, 1, NHE4, 2, NN, 1, 0.0, 175.487, "Li7D"],    # ⁷Li + D → n + 2 ⁴He
+	34: [NBE7, 1, ND, 1, NHE4, 2, NP, 1, 0.0, 194.566, "Be7D"],    # ⁷Be + D → p + 2 ⁴He
 }
 
 # Узлы таблиц Coc et al. 2015 (T9) для D + p и D + D.
@@ -159,6 +159,15 @@ var _vis_z := 0.0
 ## (в долях от числа барионов). По ним графика решает, сколько вспышек показать.
 var events: Dictionary = {}
 var _hubble := 1.0e-13  # текущий темп расширения H, 1/с
+## Numerical diagnostics, separate from physical state and animation events.
+var solver_failures := 0
+var solver_retries := 0
+var solver_fallbacks := 0
+var numerical_error := ""
+var numerical_ok := true
+var _solver_converged := true
+var solver_max_residual := 0.0
+var solver_last_residual := 0.0
 
 var Yn: float:
 	get: return Y[NN]
@@ -196,6 +205,16 @@ func reset() -> void:
 	z_ls = 0.0
 	_vis_tau = 0.0
 	_vis_best = -INF
+	_vis_t = 0.0
+	_vis_z = 0.0
+	solver_failures = 0
+	solver_retries = 0
+	solver_fallbacks = 0
+	numerical_error = ""
+	_hubble = absf(expansion) * hubble(T)
+	numerical_ok = true
+	solver_max_residual = 0.0
+	solver_last_residual = 0.0
 	events.clear()
 
 
@@ -203,7 +222,7 @@ func reset() -> void:
 func clone():
 	var c = get_script().new()
 	for prop in ["t", "T", "expansion", "eta_mult", "dN_extra", "hadron", "xH", "xHe", "ls_found",
-			"t_ls", "z_ls", "_vis_tau", "_vis_best", "_vis_t", "_vis_z"]:
+			"t_ls", "z_ls", "_vis_tau", "_vis_best", "_vis_t", "_vis_z", "substep", "numerical_ok", "numerical_error", "_hubble"]:
 		c.set(prop, get(prop))
 	c.Y = Y.duplicate()
 	return c
@@ -214,13 +233,22 @@ func eta() -> float:
 
 
 ## Продвинуть Вселенную на dlnt «е-фолдов» космического времени (t → t·e^dlnt).
-func advance(dlnt: float) -> void:
+func advance(dlnt: float) -> bool:
+	if not numerical_ok:
+		return false
+	if not is_finite(dlnt) or not is_finite(substep) or substep <= 0.0 or not is_finite(expansion) or not is_finite(eta_mult) or eta_mult <= 0.0:
+		numerical_ok = false
+		numerical_error = "Invalid integration parameters"
+		return false
 	if dlnt <= 0.0:
-		return
+		return true
 	var steps := maxi(1, ceili(dlnt / substep))
 	var h := dlnt / steps
 	for i in steps:
 		_step(h)
+		if not numerical_ok:
+			return false
+	return true
 
 
 func take_events() -> Dictionary:
@@ -235,6 +263,11 @@ func _emit(channel: String, amount: float) -> void:
 
 
 func _step(h: float) -> void:
+	var before_t := t
+	var before_T := T
+	var before_hadron := hadron
+	var before_hubble := _hubble
+	var before_events := events.duplicate()
 	# Шаг — доля h от характерного времени. Обычно это возраст t (при расширении
 	# t ≈ 1/2H), но если игрок сжимал Вселенную, возраст намного больше хаббловского
 	# времени, и шагать надо по последнему, иначе одна ступенька перескочит всю эволюцию.
@@ -257,7 +290,13 @@ func _step(h: float) -> void:
 	var nb := baryon_density()
 
 	_hadronize(h)
-	_nuclear(temp_old, dt)
+	if not _nuclear(temp_old, dt):
+		t = before_t
+		T = before_T
+		hadron = before_hadron
+		_hubble = before_hubble
+		events = before_events
+		return
 	_recombine(nb, dt)
 
 
@@ -476,6 +515,13 @@ func _hadronize(h: float) -> void:
 
 ## Скорость реакции N_A⟨σv⟩, см³/(моль·с), при температуре t9 (млрд К).
 static func _rate(id: int, t9: float) -> float:
+	# AlterBBN rate_all applies fabs to every fitted forward rate. Some fits
+	# cross zero near the ends of their range (not a reverse reaction!).
+	# https://github.com/espensem/AlterBBN/blob/d3cc09ade68eac73a864323ae3c3a5fa130675be/src/bbnrate.c#L1335
+	return absf(_rate_fit(id, t9))
+
+
+static func _rate_fit(id: int, t9: float) -> float:
 	var t13 := pow(t9, 1.0 / 3.0)
 	var t23 := t13 * t13
 	var sq := sqrt(t9)
@@ -579,14 +625,41 @@ static func _coc(tab: Array, t9: float) -> float:
 # второго порядка (Alexander, 1977), каждая стадия решается методом Ньютона.
 # Пока горячо (выше 27 млрд К), ядра не живут: считаем только n ⇄ p.
 const SDIRK_G := 0.29289321881   # γ = 1 − 1/√2
+const SOLVER_ABS_TOL := 1.0e-14 # abundance per baryon; below the displayed traces
+const SOLVER_REL_TOL := 1.0e-10
+const SOLVER_MAX_ITERATIONS := 8
+const SOLVER_MAX_SUBDIVISIONS := 10
+const SOLVER_FALLBACK_DEPTH := 4
+const SOLVER_MASS_TOL := 1.0e-10
 
 
-func _nuclear(temp_old: float, dt: float) -> void:
-	var t9 := T / 1.0e9
+func _nuclear(temp_old: float, dt: float) -> bool:
+	var before := Y.duplicate()
+	var before_events := events.duplicate()
+	if _nuclear_interval(temp_old, T, dt, 0):
+		return true
+	Y = before
+	events = before_events
+	numerical_ok = false
+	solver_failures += 1
+	numerical_error = "Nuclear solver could not converge; last accepted physical state was preserved"
+	return false
+
+
+func _retry_nuclear(temp_old: float, temp_new: float, dt: float, depth: int) -> bool:
+	if depth >= SOLVER_MAX_SUBDIVISIONS:
+		return false
+	solver_retries += 1
+	var midpoint := sqrt(temp_old * temp_new)
+	return _nuclear_interval(temp_old, midpoint, dt * 0.5, depth + 1) and _nuclear_interval(midpoint, temp_new, dt * 0.5, depth + 1)
+
+
+func _nuclear_interval(temp_old: float, temp_new: float, dt: float, depth: int) -> bool:
+	var t9 := temp_new / 1.0e9
 	if t9 > T9_NETWORK:
 		_dissociate_all()
-		var lam_np := _tab(_lam_np, T)
-		var lam_pn := _tab(_lam_pn, T)
+		var lam_np := _tab(_lam_np, temp_new)
+		var lam_pn := _tab(_lam_pn, temp_new)
 		var free := Y[NN] + Y[NP]
 		var k := lam_np + lam_pn
 		var yn_eq := free * lam_pn / maxf(k, 1.0e-300)
@@ -594,7 +667,7 @@ func _nuclear(temp_old: float, dt: float) -> void:
 		_emit("n_to_p", Y[NN] - yn)
 		Y[NN] = yn
 		Y[NP] = free - yn
-		return
+		return true
 	if t9 < 0.003:
 		# Термоядерные реакции давно погасли; остаются распады нейтрона и трития.
 		var dn := Y[NN] * (1.0 - exp(-dt / TAU_N))
@@ -604,59 +677,53 @@ func _nuclear(temp_old: float, dt: float) -> void:
 		Y[NT] -= dtr
 		Y[NHE3] += dtr
 		_emit("n_to_p", dn)
-		return
+		return true
 
-	var g := SDIRK_G
+	# SDIRK2 is not positivity preserving for every stiff transient. After four
+	# subdivisions use backward Euler, whose decay update is monotone. This is
+	# counted explicitly; the same accepted method also integrates event fluxes.
+	var fallback := depth >= SOLVER_FALLBACK_DEPTH
+	var g := 1.0 if fallback else SDIRK_G
 	var y0 := Y.duplicate()
 	# Стадия 1: в момент t + γ·dt.
-	var t1 := temp_old * pow(T / temp_old, g)
+	var t1 := temp_old * pow(temp_new / temp_old, g)
 	var c1 := _coeffs(t1)
 	var y1 := _implicit(y0, g * dt, c1)
+	if not _solver_converged:
+		return _retry_nuclear(temp_old, temp_new, dt, depth)
 	# Стадия 2: в конце шага, с наклоном первой стадии.
-	var c2 := _coeffs(T)
+	var c2 := _coeffs(temp_new)
 	var start := PackedFloat64Array()
 	start.resize(NSPEC)
 	var r := (1.0 - g) / g
 	for i in NSPEC:
 		start[i] = y0[i] + r * (y1[i] - y0[i])
-	var y := _implicit(start, g * dt, c2)
+	var y := y1 if fallback else _implicit(start, g * dt, c2)
+	var mass_error := 0.0
+	for i in NSPEC:
+		mass_error += (y[i] - y0[i]) * MASS[i]
+	if not _solver_converged or not is_finite(mass_error) or absf(mass_error) > SOLVER_MASS_TOL:
+		return _retry_nuclear(temp_old, temp_new, dt, depth)
 
+	if fallback:
+		solver_fallbacks += 1
 	# Сколько реакций каждого вида случилось — для вспышек на экране.
-	var lam_np: float = c2[0]
-	var lam_pn: float = c2[1]
-	_emit("n_to_p", (lam_np * y[NN] - lam_pn * y[NP]) * dt)
-	var he_made := 0.0
-	var a3_made := 0.0
-	var li_made := 0.0
+	# SDIRK2 advances by dt * ((1-g) F(y1) + g F(y2)). Use those same
+	# quadrature weights for event amounts, not the final-stage rate alone.
+	var weak1: float = c1[0] * y1[NN] - c1[1] * y1[NP]
+	var weak2: float = c2[0] * y[NN] - c2[1] * y[NP]
+	_emit("n_to_p", ((1.0 - g) * weak1 + g * weak2) * dt)
 	var kf: PackedFloat64Array = c2[2]
 	var kr: PackedFloat64Array = c2[3]
+	var kf1: PackedFloat64Array = c1[2]
+	var kr1: PackedFloat64Array = c1[3]
 	var keys := REACTIONS.keys()
 	for k in keys.size():
 		var re: Array = REACTIONS[keys[k]]
-		var net := _net_flux(re, kf[k], kr[k], y) * dt
-		var ch: String = re[10]
-		match ch:
-			"pn_D", "Dp", "Dn", "He3n":
-				_emit(ch, net)
-			"DDn", "DDp":
-				if net >= 0.0:
-					_emit(ch, net)
-				else:
-					a3_made += net
-			"A3Dn", "A3Dp", "A3n", "A3p":
-				if net >= 0.0:
-					_emit(ch, net)
-				else:
-					he_made += net
-			"Li":
-				if net >= 0.0:
-					_emit(ch, net)
-				else:
-					li_made += net
-	_emit("He_melt", -he_made)
-	_emit("A3_melt", -a3_made)
-	_emit("Li_melt", -li_made)
+		var net := ((1.0 - g) * _net_flux(re, kf1[k], kr1[k], y1) + g * _net_flux(re, kf[k], kr[k], y)) * dt
+		_emit(re[10], net)
 	Y = y
+	return true
 
 
 ## Коэффициенты реакций при температуре temp: [λ(n→p), λ(p→n), прямые, обратные].
@@ -684,6 +751,7 @@ func _coeffs(temp: float) -> Array:
 
 ## Решить y = start + c·F(y) методом Ньютона.
 func _implicit(start: PackedFloat64Array, c: float, co: Array) -> PackedFloat64Array:
+	_solver_converged = false
 	var lam_np: float = co[0]
 	var lam_pn: float = co[1]
 	var kf: PackedFloat64Array = co[2]
@@ -693,7 +761,10 @@ func _implicit(start: PackedFloat64Array, c: float, co: Array) -> PackedFloat64A
 	y.resize(NSPEC)
 	for i in NSPEC:
 		y[i] = maxf(start[i], 0.0)
-	for it in 4:
+	# Evaluate the backward error after each correction. Stiff equilibrium
+	# contains large cancelling forward/reverse terms, so normalize by the
+	# equation's row scale as well as the species abundance (not abundance alone).
+	for it in SOLVER_MAX_ITERATIONS + 1:
 		var fv := PackedFloat64Array()
 		fv.resize(NSPEC)
 		var jac := PackedFloat64Array()
@@ -716,14 +787,34 @@ func _implicit(start: PackedFloat64Array, c: float, co: Array) -> PackedFloat64A
 		var resid := 0.0
 		for i in NSPEC:
 			rhs[i] = -(y[i] - start[i] - c * fv[i])
-			resid = maxf(resid, absf(rhs[i]) / maxf(absf(y[i]), 1.0e-14))
+			if not is_finite(rhs[i]) or not is_finite(y[i]):
+				solver_last_residual = INF
+				solver_max_residual = INF
+				return y
+			var scale := absf(start[i]) + absf(y[i])
 			for j in NSPEC:
 				m[i * NSPEC + j] = (1.0 if i == j else 0.0) - c * jac[i * NSPEC + j]
-		if it > 0 and resid < 1.0e-10:
+				scale += absf(c * jac[i * NSPEC + j] * y[j])
+			resid = maxf(resid, absf(rhs[i]) / (SOLVER_ABS_TOL + SOLVER_REL_TOL * scale))
+		# All reactions conserve baryon number. Replacing the redundant proton
+		# equation avoids subtracting enormous cancelling rates in that row.
+		rhs[NP] = 0.0
+		for j in NSPEC:
+			m[NP * NSPEC + j] = MASS[j]
+			rhs[NP] += (start[j] - y[j]) * MASS[j]
+		solver_last_residual = resid
+		if it > 0 and resid <= 1.0:
+			break
+		if it == SOLVER_MAX_ITERATIONS:
 			break
 		var dy := _solve(m, rhs)
+		if dy.is_empty():
+			solver_last_residual = INF
+			break
 		for i in NSPEC:
 			y[i] = maxf(y[i] + dy[i], 0.0)
+	solver_max_residual = maxf(solver_max_residual, solver_last_residual)
+	_solver_converged = is_finite(solver_last_residual) and solver_last_residual <= 1.0
 	return y
 
 
@@ -801,8 +892,8 @@ static func _solve(m: PackedFloat64Array, b: PackedFloat64Array) -> PackedFloat6
 			b[col] = b[piv]
 			b[piv] = tb
 		var d := m[col * n + col]
-		if absf(d) < 1.0e-300:
-			continue
+		if not is_finite(d) or absf(d) < 1.0e-300:
+			return PackedFloat64Array()
 		for r in range(col + 1, n):
 			var f := m[r * n + col] / d
 			if f == 0.0:
@@ -817,13 +908,17 @@ static func _solve(m: PackedFloat64Array, b: PackedFloat64Array) -> PackedFloat6
 		for k in range(i + 1, n):
 			s -= m[i * n + k] * x[k]
 		var d := m[i * n + i]
-		x[i] = s / d if absf(d) > 1.0e-300 else 0.0
+		if not is_finite(d) or absf(d) < 1.0e-300:
+			return PackedFloat64Array()
+		x[i] = s / d
+		if not is_finite(x[i]):
+			return PackedFloat64Array()
 	return x
 
 
 # Если игрок сжал и разогрел Вселенную выше 27 млрд К, ядра разваливаются на нуклоны.
 func _dissociate_all() -> void:
-	var melted := {"He_melt": Y[NHE4], "A3_melt": Y[NT] + Y[NHE3], "Li_melt": Y[NLI7] + Y[NBE7]}
+	var melted := {"He_melt": Y[NHE4], "A3_melt": Y[NHE3], "T_melt": Y[NT], "Li_melt": Y[NLI7], "Be_melt": Y[NBE7]}
 	if Y[ND] + Y[NT] + Y[NHE3] + Y[NHE4] + Y[NLI7] + Y[NBE7] <= 0.0:
 		return
 	_emit("pn_D", -Y[ND])

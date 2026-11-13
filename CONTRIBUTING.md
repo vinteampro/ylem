@@ -14,13 +14,13 @@ requests in English or Russian are both fine.
 
 1. Install [Godot 4.7](https://godotengine.org/download/) (standard build, GDScript only).
 2. Open `project.godot` and press **F5**.
-3. Run the physics check (about 30 seconds, no graphics):
+3. With Godot 4.7.2 stable and Python 3, run all required checks (no graphics):
 
    ```
-   godot --headless --path . --script res://tools/sim_check.gd
+   python3 tools/check.py
    ```
 
-   It must end with `ИТОГ: всё в допусках` ("all within tolerance").
+   It must end with `CHECKS PASSED`; per-suite logs are in `build/checks/`.
 
 Useful debug arguments (start temperature, levers, screenshots) are listed in the README,
 section "For development".
@@ -38,7 +38,7 @@ The game promises "a meditation built on real physics". To keep that promise:
 
 - **No fudge factors.** Every constant and rate comes from a published source. Put the
   reference in a comment next to the number (author, year, journal or arXiv id).
-- **`sim_check.gd` must pass.** If your change improves agreement, tighten the tolerance in
+- **All `tools/check.py` suites must pass.** If your change improves agreement, tighten the tolerance in
   the same pull request.
 - **Say what changed in numbers.** In the pull request, paste the `sim_check` output before
   and after.
@@ -80,13 +80,13 @@ Ylem — небольшая игра на настоящей модели ран
 
 1. Установи [Godot 4.7](https://godotengine.org/download/) (обычная сборка, только GDScript).
 2. Открой `project.godot` и нажми **F5**.
-3. Запусти проверку физики (около 30 секунд, без графики):
+3. С Godot 4.7.2 stable и Python 3 запусти все обязательные проверки (без графики):
 
    ```
-   godot --headless --path . --script res://tools/sim_check.gd
+   python3 tools/check.py
    ```
 
-   В конце должно быть `ИТОГ: всё в допусках`.
+   В конце должно быть `CHECKS PASSED`; логи отдельных проверок — в `build/checks/`.
 
 Отладочные аргументы (стартовая температура, рычаги, скриншоты) — в README, раздел
 «Для разработки».
@@ -105,7 +105,7 @@ Ylem — небольшая игра на настоящей модели ран
 - **Никаких подгоночных коэффициентов.** Каждая константа и скорость реакции берётся из
   опубликованного источника. Ссылку пиши в комментарии рядом с числом (автор, год, журнал
   или arXiv).
-- **`sim_check.gd` должен проходить.** Если изменение улучшает согласие, сузь допуск в том
+- **Все проверки `tools/check.py` должны проходить.** Если изменение улучшает согласие, сузь допуск в том
   же pull request.
 - **Покажи изменения в числах.** В pull request приложи вывод `sim_check` до и после.
 - **Обнови README.** Убрал упрощение — вычеркни его из списка «Упрощено»; добавил — впиши.

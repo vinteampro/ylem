@@ -75,6 +75,7 @@ var _shot_index := 0
 # Прогноз: копия модели, которую в фоне досчитывают до конца нуклеосинтеза.
 var _fc = null
 var _fc_out: Dictionary = {}
+var _fc_parameters: Array = []
 
 # Мышь.
 var _lmb_down := false
@@ -150,6 +151,9 @@ func _build_world() -> void:
 	add_child(field)
 	field.reaction_shown.connect(_on_reaction)
 	field.species_seen.connect(_on_species)
+	field.follow_ended.connect(func() -> void:
+		hud.hide_inspect()
+		hud.say(I18n.t("observation_ended")))
 	field.follow_changed.connect(func(active: bool) -> void:
 		if not active:
 			hud.hide_inspect())
@@ -198,12 +202,12 @@ func _make_hud() -> void:
 		_shift_tint += (v - u.expansion) * 2.5
 		u.expansion = v
 		audio.nudge_expansion(v)
-		_fc = null)
+		_invalidate_forecast())
 	hud.detent.connect(func() -> void: audio.play_detent())
 	hud.density_changed.connect(func(v: float) -> void:
 		_manual()
 		u.eta_mult = pow(10.0, v)
-		_fc = null)
+		_invalidate_forecast())
 	hud.speed_changed.connect(func(v: float) -> void:
 		_manual()
 		speed = v)
@@ -279,8 +283,11 @@ func _start() -> void:
 	shown_epoch = -1
 	intro_t = 0.0
 	_t_transparent = 0.0
-	_fc = null
-	_fc_out = {}
+	_invalidate_forecast()
+	_lmb_down = false
+	_panning = false
+	_shift_tint = 0.0
+	field.set_hand(Vector2.ZERO, 0)
 	field.sync(u)
 	field.reset_field()
 	hud.clear_messages()
@@ -300,8 +307,19 @@ func _start() -> void:
 	start.reset()
 	if _start_T > 0.0:
 		_skip_intro()
-		while u.T > _start_T:
-			u.advance(0.02)
+		# Prepare the requested temperature on a cooling trajectory, then apply
+		# a stationary/contracting debug lever. Otherwise --start-T cannot finish.
+		var requested_expansion: float = u.expansion
+		if u.expansion <= 0.0:
+			u.expansion = 1.0
+		var steps := 0
+		while u.T > maxf(_start_T, 1.0) and steps < 20000:
+			if not u.advance(0.02):
+				_numerical_stop()
+				break
+			steps += 1
+		u.expansion = requested_expansion
+		_invalidate_forecast()
 		u.take_events()
 		field.rebuild_from(u)
 		if u.ls_found:
@@ -388,9 +406,10 @@ func _process(delta: float) -> void:
 	_update_mouse(delta)
 	_run_demo()
 	var lt := Palette.log10(u.T)
-	if not paused and u.T > STOP_T:
+	if not paused and (u.T > STOP_T or u.expansion < 0.0):
 		var ramp := smoothstep(2.5, 8.0, intro_t)
-		u.advance(_pace(lt) * speed * ramp * delta)
+		if not u.advance(_pace(lt) * speed * ramp * delta):
+			_numerical_stop()
 		lt = Palette.log10(u.T)
 	_forecast_step()
 
@@ -617,7 +636,7 @@ func _update_hud(delta: float) -> void:
 	else:
 		rows.append([I18n.t("row_hydrogen"), _pct(u.Yp), u.Yp, _ui_color(PK.P)])
 		if u.Yn > 1.0e-6 or u.T > 1.0e8:
-			var clock := {"clock": clampf(u.t / 879.4, 0.0, 1.0)} if u.T > 2.5e8 else {}
+			var clock := {"clock": clampf(u.t / UniverseModel.TAU_N, 0.0, 1.0)} if u.T > 2.5e8 else {}
 			rows.append([I18n.t("row_neutrons"), _pct(u.Yn), u.Yn * 2.0, _ui_color(PK.N), clock])
 		var dh_text := Fmt.sci(u.d_to_h())
 		var dh_extra := {}
@@ -666,6 +685,8 @@ func _autopilot(delta: float) -> void:
 
 
 func _toggle_pause() -> void:
+	if not u.numerical_ok:
+		return
 	paused = not paused
 	hud.set_paused(paused)
 
@@ -841,19 +862,34 @@ func _run_autoplayer() -> void:
 
 
 ## Досчитываем копию модели до конца нуклеосинтеза — понемногу, ~3 мс за кадр.
+func _invalidate_forecast() -> void:
+	_fc = null
+	_fc_out.clear()
+	_fc_parameters = [u.expansion, u.eta_mult, u.dN_extra]
+
+
+func _numerical_stop() -> void:
+	paused = true
+	hud.set_paused(true)
+	_invalidate_forecast()
+	hud.say(I18n.t("numerical_stop"))
+
+
 func _forecast_step() -> void:
-	if u.T < 2.5e8:
-		_fc = null
+	# Covers sliders, autopilot and programmatic changes, including reheating.
+	if _fc_parameters != [u.expansion, u.eta_mult, u.dN_extra]:
+		_invalidate_forecast()
+	if not u.numerical_ok or u.T < 2.5e8 or u.expansion < 0.05:
+		_invalidate_forecast()
 		return
 	if _fc == null:
-		if u.expansion < 0.05:
-			_fc_out = {}
-			return
 		_fc = u.clone()
 		_fc.substep = 0.05
 	var t0 := Time.get_ticks_usec()
 	while Time.get_ticks_usec() - t0 < 3000:
-		_fc.advance(0.05)
+		if not _fc.advance(0.05):
+			_invalidate_forecast()
+			return
 		_fc.take_events()
 		if _fc.T < 2.0e8:
 			_fc_out = {"yp": _fc.helium_mass_fraction(), "dh": _fc.d_to_h()}
